@@ -1,0 +1,227 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  ADMIN
+  PURCHASER
+  VIEWER
+}
+
+enum BasicStatus {
+  ACTIVE
+  INACTIVE
+}
+
+enum ProductState {
+  LAUNCHABLE
+  SCHEDULABLE
+  BLOCKED
+}
+
+enum ProductionBatchStatus {
+  PENDING
+  PAUSED
+  COMPLETED
+}
+
+enum RunType {
+  SCHEDULED
+  MANUAL
+}
+
+enum CalcRunStatus {
+  RUNNING
+  SUCCESS
+  FAILED
+}
+
+model User {
+  id           String   @id @default(cuid())
+  name         String
+  username     String   @unique
+  passwordHash String
+  role         UserRole
+  status       BasicStatus @default(ACTIVE)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  receiptBatches          MaterialReceiptBatch[]
+  sharedMaterialAllocations SharedMaterialAllocation[]
+}
+
+model Product {
+  id                       String   @id @default(cuid())
+  productCode              String   @unique
+  productName              String
+  status                   BasicStatus @default(ACTIVE)
+  minStartQty              Int
+  standardProductionDays   Int
+  bufferDays               Int
+  shortWindowDays          Int? 
+  createdAt                DateTime @default(now())
+  updatedAt                DateTime @updatedAt
+
+  bomVersions              BomVersion[]
+  receiptBatchLinks        ReceiptBatchLink[]
+  productionBatches        ProductionBatch[]
+  snapshots                ProductSnapshot[]
+}
+
+model Material {
+  id                String   @id @default(cuid())
+  materialCode      String   @unique
+  materialName      String
+  unit              String
+  status            BasicStatus @default(ACTIVE)
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  bomItems          BomItem[]
+  receiptBatches    MaterialReceiptBatch[]
+}
+
+model BomVersion {
+  id             String   @id @default(cuid())
+  productId      String
+  versionNo      String
+  effectiveFrom  DateTime
+  effectiveTo    DateTime?
+  isActive       Boolean  @default(false)
+  remark         String?
+  createdAt      DateTime @default(now())
+  updatedAt      DateTime @updatedAt
+
+  product        Product  @relation(fields: [productId], references: [id])
+  items          BomItem[]
+  productionBatches ProductionBatch[]
+}
+
+model BomItem {
+  id                String   @id @default(cuid())
+  bomVersionId      String
+  materialId        String
+  unitUsage         Int
+  isSharedMaterial  Boolean
+  lossRate          Float?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  bomVersion        BomVersion @relation(fields: [bomVersionId], references: [id])
+  material          Material   @relation(fields: [materialId], references: [id])
+}
+
+model MaterialReceiptBatch {
+  id                String   @id @default(cuid())
+  materialId        String
+  receiptBatchNo    String
+  arrivedQty        Int
+  arrivedAt         DateTime
+  purchaserUserId   String
+  sourceType        String
+  note              String?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  material          Material @relation(fields: [materialId], references: [id])
+  purchaser         User @relation(fields: [purchaserUserId], references: [id])
+  receiptBatchLinks ReceiptBatchLink[]
+  sharedAllocations SharedMaterialAllocation[]
+}
+
+model ReceiptBatchLink {
+  id              String   @id @default(cuid())
+  receiptBatchId  String
+  productId       String
+  linkedQty       Int
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  receiptBatch    MaterialReceiptBatch @relation(fields: [receiptBatchId], references: [id])
+  product         Product @relation(fields: [productId], references: [id])
+}
+
+model ProductionBatch {
+  id                   String   @id @default(cuid())
+  productId            String
+  bomVersionId         String
+  batchNo              String
+  plannedQty           Int
+  batchStatus          ProductionBatchStatus
+  predictedStartDate   DateTime?
+  predictedFinishDate  DateTime?
+  predictedLaunchDate  DateTime?
+  blockingReason       String?
+  generatedByRunId     String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  product              Product @relation(fields: [productId], references: [id])
+  bomVersion           BomVersion @relation(fields: [bomVersionId], references: [id])
+  generatedByRun       CalcRun? @relation(fields: [generatedByRunId], references: [id])
+  sharedAllocations    SharedMaterialAllocation[]
+  actual               ProductionBatchActual?
+}
+
+model SharedMaterialAllocation {
+  id                  String   @id @default(cuid())
+  receiptBatchId      String
+  productionBatchId   String
+  allocatedQty        Int
+  allocatedByUserId   String
+  allocatedAt         DateTime
+  note                String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  receiptBatch        MaterialReceiptBatch @relation(fields: [receiptBatchId], references: [id])
+  productionBatch     ProductionBatch @relation(fields: [productionBatchId], references: [id])
+  allocatedBy         User @relation(fields: [allocatedByUserId], references: [id])
+}
+
+model ProductSnapshot {
+  id                        String   @id @default(cuid())
+  productId                 String
+  calcRunId                 String
+  launchableQtyNow          Int
+  launchableQtyShortTerm    Int
+  nextLaunchDate            DateTime?
+  productState              ProductState
+  reasonSummary             String
+  createdAt                 DateTime @default(now())
+
+  product                   Product @relation(fields: [productId], references: [id])
+  calcRun                   CalcRun @relation(fields: [calcRunId], references: [id])
+}
+
+model ProductionBatchActual {
+  id                String   @id @default(cuid())
+  productionBatchId String   @unique
+  actualStartAt     DateTime?
+  actualFinishAt    DateTime?
+  actualLaunchAt    DateTime?
+  actualLaunchQty   Int?
+  createdAt         DateTime @default(now())
+  updatedAt         DateTime @updatedAt
+
+  productionBatch   ProductionBatch @relation(fields: [productionBatchId], references: [id])
+}
+
+model CalcRun {
+  id            String   @id @default(cuid())
+  runType       RunType
+  startedAt     DateTime
+  finishedAt    DateTime?
+  status        CalcRunStatus
+  errorMessage  String?
+  createdAt     DateTime @default(now())
+
+  productionBatches ProductionBatch[]
+  snapshots         ProductSnapshot[]
+}
+

@@ -1,0 +1,14 @@
+import { ProductState } from '@/lib/types';
+
+const statusMap: Record<ProductState, { label: string; className: string }> = {
+  LAUNCHABLE: { label: '可上架', className: 'status-launchable' },
+  SCHEDULABLE: { label: '可预排', className: 'status-schedulable' },
+  BLOCKED: { label: '受阻', className: 'status-blocked' },
+};
+
+export function StatusChip({ state }: { state: ProductState }) {
+  const config = statusMap[state];
+
+  return <span className={`status-chip ${config.className}`}>{config.label}</span>;
+}
+
