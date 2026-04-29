@@ -12,7 +12,7 @@ import { PrismaModule } from './shared/prisma.module';
   imports: [
     ConfigModule.forRoot({
       isGlobal: true,
-      envFilePath: '.env',
+      envFilePath: ['../../.env', '.env'],
     }),
     ScheduleModule.forRoot(),
     AppConfigModule,

@@ -86,6 +86,52 @@ export type OperationBootstrap = {
     name: string;
     username: string;
   }>;
+  activeBoms: Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productName: string;
+    versionNo: string;
+    effectiveFrom: string;
+    remark: string | null;
+    items: Array<{
+      id: string;
+      materialId: string;
+      materialCode: string;
+      materialName: string;
+      unitUsage: number;
+      isSharedMaterial: boolean;
+    }>;
+  }>;
+  procurementTracks: Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productName: string;
+    materialId: string;
+    materialCode: string;
+    materialName: string;
+    purchaserName: string;
+    requiredQty: number;
+    orderedQty: number;
+    arrivedQty: number;
+    orderStatus: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
+    productionStatus:
+      | 'NOT_STARTED'
+      | 'IN_PRODUCTION'
+      | 'READY_TO_SHIP'
+      | 'SHIPPED'
+      | 'ARRIVED';
+    expectedShipAt: string | null;
+    inTransitAt: string | null;
+    expectedArriveAt: string | null;
+    actualArriveAt: string | null;
+    receiptBatchNo: string | null;
+    todoNote: string | null;
+    nextFollowUpAt: string | null;
+    note: string | null;
+    receiptBatchId: string | null;
+  }>;
   pendingBatches: Array<{
     id: string;
     batchNo: string;
@@ -95,9 +141,16 @@ export type OperationBootstrap = {
     plannedQty: number;
     predictedLaunchDate: string | null;
     blockingReason: string | null;
+    actual: {
+      startAt: string | null;
+      finishAt: string | null;
+      launchAt: string | null;
+      launchQty: number | null;
+    } | null;
     sharedRequirements: Array<{
       materialId: string;
       materialName: string;
+      isSharedMaterial: boolean;
       requiredQty: number;
       allocatedQty: number;
       remainingQty: number;
@@ -125,6 +178,42 @@ export type ReceiptPayload = {
   productId?: string;
 };
 
+export type ProcurementTrackPayload = {
+  productId: string;
+  materialId: string;
+  requiredQty: number;
+  orderedQty: number;
+  expectedShipAt?: string;
+  expectedArriveAt?: string;
+  nextFollowUpAt?: string;
+  todoNote?: string;
+  note?: string;
+};
+
+export type ProcurementTrackUpdatePayload = {
+  orderedQty?: number;
+  orderStatus?: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
+  productionStatus?:
+    | 'NOT_STARTED'
+    | 'IN_PRODUCTION'
+    | 'READY_TO_SHIP'
+    | 'SHIPPED'
+    | 'ARRIVED';
+  expectedShipAt?: string | null;
+  inTransitAt?: string | null;
+  expectedArriveAt?: string | null;
+  nextFollowUpAt?: string | null;
+  todoNote?: string | null;
+  note?: string | null;
+};
+
+export type ProcurementArrivalPayload = {
+  receiptBatchNo: string;
+  arrivedQty: number;
+  arrivedAt: string;
+  note?: string;
+};
+
 export type AllocationPayload = {
   receiptBatchId: string;
   productionBatchId: string;
@@ -132,8 +221,28 @@ export type AllocationPayload = {
   note?: string;
 };
 
+export type BomVersionPayload = {
+  productId: string;
+  versionNo: string;
+  effectiveFrom: string;
+  remark?: string;
+  activate?: boolean;
+  items: Array<{
+    materialId: string;
+    unitUsage: number;
+    isSharedMaterial: boolean;
+  }>;
+};
+
 export type BatchStatusPayload = {
   batchStatus: 'PENDING' | 'PAUSED' | 'COMPLETED';
+};
+
+export type BatchActualPayload = {
+  actualStartAt?: string | null;
+  actualFinishAt?: string | null;
+  actualLaunchAt?: string | null;
+  actualLaunchQty?: number | null;
 };
 
 export type AuthUser = {

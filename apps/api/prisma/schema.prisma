@@ -41,6 +41,21 @@ enum CalcRunStatus {
   FAILED
 }
 
+enum ProcurementOrderStatus {
+  NOT_ORDERED
+  ORDERED
+  PARTIAL
+  COMPLETED
+}
+
+enum ProcurementProductionStatus {
+  NOT_STARTED
+  IN_PRODUCTION
+  READY_TO_SHIP
+  SHIPPED
+  ARRIVED
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -53,6 +68,7 @@ model User {
 
   receiptBatches          MaterialReceiptBatch[]
   sharedMaterialAllocations SharedMaterialAllocation[]
+  procurementTracks       MaterialProcurementTrack[]
 }
 
 model Product {
@@ -71,6 +87,7 @@ model Product {
   receiptBatchLinks        ReceiptBatchLink[]
   productionBatches        ProductionBatch[]
   snapshots                ProductSnapshot[]
+  procurementTracks        MaterialProcurementTrack[]
 }
 
 model Material {
@@ -84,6 +101,7 @@ model Material {
 
   bomItems          BomItem[]
   receiptBatches    MaterialReceiptBatch[]
+  procurementTracks MaterialProcurementTrack[]
 }
 
 model BomVersion {
@@ -132,6 +150,35 @@ model MaterialReceiptBatch {
   purchaser         User @relation(fields: [purchaserUserId], references: [id])
   receiptBatchLinks ReceiptBatchLink[]
   sharedAllocations SharedMaterialAllocation[]
+  procurementTracks MaterialProcurementTrack[]
+}
+
+model MaterialProcurementTrack {
+  id                    String   @id @default(cuid())
+  productId             String
+  materialId            String
+  purchaserUserId       String
+  receiptBatchId        String?
+  requiredQty           Int
+  orderedQty            Int
+  arrivedQty            Int      @default(0)
+  orderStatus           ProcurementOrderStatus @default(NOT_ORDERED)
+  productionStatus      ProcurementProductionStatus @default(NOT_STARTED)
+  expectedShipAt        DateTime?
+  inTransitAt           DateTime?
+  expectedArriveAt      DateTime?
+  actualArriveAt        DateTime?
+  receiptBatchNo        String?
+  todoNote              String?
+  nextFollowUpAt        DateTime?
+  note                  String?
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  product               Product @relation(fields: [productId], references: [id])
+  material              Material @relation(fields: [materialId], references: [id])
+  purchaser             User @relation(fields: [purchaserUserId], references: [id])
+  receiptBatch          MaterialReceiptBatch? @relation(fields: [receiptBatchId], references: [id])
 }
 
 model ReceiptBatchLink {
@@ -224,4 +271,3 @@ model CalcRun {
   productionBatches ProductionBatch[]
   snapshots         ProductSnapshot[]
 }
-

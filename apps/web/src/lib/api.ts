@@ -2,11 +2,16 @@ import { mockOperations, mockProductDetail, mockProducts } from './mock-data';
 import {
   AllocationPayload,
   AuthUser,
+  BatchActualPayload,
   BatchStatusPayload,
+  BomVersionPayload,
   LoginResponse,
   OperationBootstrap,
   ProductDetail,
   ProductListItem,
+  ProcurementArrivalPayload,
+  ProcurementTrackPayload,
+  ProcurementTrackUpdatePayload,
   ReceiptPayload,
 } from './types';
 
@@ -59,7 +64,7 @@ async function postJson<TInput, TOutput>(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || 'Request failed');
+    throw new Error(readErrorMessage(text) || 'Request failed');
   }
 
   return (await response.json()) as TOutput;
@@ -81,18 +86,61 @@ async function patchJson<TInput, TOutput>(
 
   if (!response.ok) {
     const text = await response.text();
-    throw new Error(text || 'Request failed');
+    throw new Error(readErrorMessage(text) || 'Request failed');
   }
 
   return (await response.json()) as TOutput;
+}
+
+function readErrorMessage(text: string) {
+  if (!text) {
+    return '';
+  }
+
+  try {
+    const parsed = JSON.parse(text) as { message?: string | string[] };
+    if (Array.isArray(parsed.message)) {
+      return parsed.message.join('；');
+    }
+    return parsed.message ?? text;
+  } catch {
+    return text;
+  }
 }
 
 export function createReceipt(payload: ReceiptPayload, token: string) {
   return postJson('/operations/receipts', payload, token);
 }
 
+export function createProcurementTrack(
+  payload: ProcurementTrackPayload,
+  token: string,
+) {
+  return postJson('/operations/procurement-tracks', payload, token);
+}
+
+export function updateProcurementTrack(
+  trackId: string,
+  payload: ProcurementTrackUpdatePayload,
+  token: string,
+) {
+  return patchJson(`/operations/procurement-tracks/${trackId}`, payload, token);
+}
+
+export function confirmProcurementArrival(
+  trackId: string,
+  payload: ProcurementArrivalPayload,
+  token: string,
+) {
+  return postJson(`/operations/procurement-tracks/${trackId}/arrival`, payload, token);
+}
+
 export function createAllocation(payload: AllocationPayload, token: string) {
   return postJson('/operations/allocations', payload, token);
+}
+
+export function createBomVersion(payload: BomVersionPayload, token: string) {
+  return postJson('/operations/bom-versions', payload, token);
 }
 
 export function updateBatchStatus(
@@ -101,6 +149,14 @@ export function updateBatchStatus(
   token: string,
 ) {
   return patchJson(`/operations/production-batches/${batchId}/status`, payload, token);
+}
+
+export function updateBatchActual(
+  batchId: string,
+  payload: BatchActualPayload,
+  token: string,
+) {
+  return patchJson(`/operations/production-batches/${batchId}/actual`, payload, token);
 }
 
 export async function login(username: string, password: string) {

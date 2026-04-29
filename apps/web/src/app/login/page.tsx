@@ -10,7 +10,7 @@ export default function LoginPage() {
         </Link>
         <span className="eyebrow">Auth</span>
         <h1 style={{ fontSize: '40px', lineHeight: 1.1, maxWidth: 760 }}>
-          先登录，再进入采购和管理员操作台。
+          登录后按账号角色进入对应界面。
         </h1>
       </section>
       <LoginForm />

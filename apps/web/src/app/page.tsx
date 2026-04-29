@@ -1,5 +1,6 @@
 import Link from 'next/link';
 import { getProducts } from '@/lib/api';
+import { HomeActions } from '@/components/home-actions';
 import { StatusChip } from '@/components/status-chip';
 
 function formatDate(input: string | null) {
@@ -21,18 +22,16 @@ export default async function HomePage() {
   return (
     <main className="page-shell">
       <section className="hero">
-        <span className="eyebrow">Launch Decision V1</span>
+        <div className="dashboard-header">
+          <span className="eyebrow">上架决策看板 V1</span>
+          <HomeActions />
+        </div>
         <h1 style={{ fontSize: '44px', lineHeight: 1.05, maxWidth: 820 }}>
           直播间上什么品，不再靠口头追问。
         </h1>
         <p className="muted" style={{ fontSize: '16px', maxWidth: 720 }}>
           按分批到料、共用料分配、BOM 当前生效版本与最低开工门槛，汇总单品当前可上架量、短期新增量和下一批预计时间。
         </p>
-        <div>
-          <Link href="/operations" className="action-button" style={{ display: 'inline-flex' }}>
-            进入操作台
-          </Link>
-        </div>
       </section>
 
       <section className="stats-grid" style={{ marginBottom: 24 }}>
@@ -69,6 +68,7 @@ export default async function HomePage() {
               <th>下一批预计上架</th>
               <th>状态</th>
               <th>关键原因</th>
+              <th>操作</th>
             </tr>
           </thead>
           <tbody>
@@ -87,6 +87,14 @@ export default async function HomePage() {
                   <StatusChip state={product.status} />
                 </td>
                 <td className="muted">{product.reasonSummary}</td>
+                <td>
+                  <Link
+                    href={`/products/${product.id}`}
+                    className="secondary-button table-action"
+                  >
+                    查看详情
+                  </Link>
+                </td>
               </tr>
             ))}
           </tbody>

@@ -3,18 +3,37 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { ProductionBatchStatus, UserRole } from '@prisma/client';
+import {
+  ProcurementOrderStatus,
+  ProcurementProductionStatus,
+  ProductionBatchStatus,
+  UserRole,
+} from '@prisma/client';
 import { PrismaService } from '../shared/prisma.service';
+import { ConfirmProcurementArrivalDto } from './dto/confirm-procurement-arrival.dto';
 import { CreateAllocationDto } from './dto/create-allocation.dto';
+import { CreateBomVersionDto } from './dto/create-bom-version.dto';
+import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
+import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
 import { UpdateBatchStatusDto } from './dto/update-batch-status.dto';
+import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
 
 @Injectable()
 export class OperationsService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async getBootstrapData(user: { role: UserRole }) {
-    const [materials, products, purchasers, admins, pendingBatches, sharedReceipts] =
+  async getBootstrapData(user: { id: string; role: UserRole }) {
+    const [
+      materials,
+      products,
+      purchasers,
+      admins,
+      activeBoms,
+      procurementTracks,
+      pendingBatches,
+      sharedReceipts,
+    ] =
       await Promise.all([
         this.prisma.material.findMany({
           where: { status: 'ACTIVE' },
@@ -32,6 +51,38 @@ export class OperationsService {
           where: { role: UserRole.ADMIN, status: 'ACTIVE' },
           orderBy: { username: 'asc' },
         }),
+        this.prisma.bomVersion.findMany({
+          where: { isActive: true },
+          include: {
+            product: true,
+            items: {
+              include: {
+                material: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
+          },
+          orderBy: [{ product: { productCode: 'asc' } }, { versionNo: 'asc' }],
+        }),
+        this.prisma.materialProcurementTrack.findMany({
+          where:
+            user.role === UserRole.PURCHASER
+              ? { purchaserUserId: user.id }
+              : undefined,
+          include: {
+            product: true,
+            material: true,
+            purchaser: true,
+            receiptBatch: true,
+          },
+          orderBy: [
+            { nextFollowUpAt: 'asc' },
+            { expectedArriveAt: 'asc' },
+            { updatedAt: 'desc' },
+          ],
+        }),
         this.prisma.productionBatch.findMany({
           where: {
             batchStatus: {
@@ -39,6 +90,7 @@ export class OperationsService {
             },
           },
           include: {
+            actual: true,
             product: true,
             bomVersion: {
               include: {
@@ -98,6 +150,47 @@ export class OperationsService {
               username: admin.username,
             }))
           : [],
+      activeBoms: activeBoms.map((bom) => ({
+        id: bom.id,
+        productId: bom.productId,
+        productCode: bom.product.productCode,
+        productName: bom.product.productName,
+        versionNo: bom.versionNo,
+        effectiveFrom: bom.effectiveFrom,
+        remark: bom.remark,
+        items: bom.items.map((item) => ({
+          id: item.id,
+          materialId: item.materialId,
+          materialCode: item.material.materialCode,
+          materialName: item.material.materialName,
+          unitUsage: item.unitUsage,
+          isSharedMaterial: item.isSharedMaterial,
+        })),
+      })),
+      procurementTracks: procurementTracks.map((track) => ({
+        id: track.id,
+        productId: track.productId,
+        productCode: track.product.productCode,
+        productName: track.product.productName,
+        materialId: track.materialId,
+        materialCode: track.material.materialCode,
+        materialName: track.material.materialName,
+        purchaserName: track.purchaser.name,
+        requiredQty: track.requiredQty,
+        orderedQty: track.orderedQty,
+        arrivedQty: track.arrivedQty,
+        orderStatus: track.orderStatus,
+        productionStatus: track.productionStatus,
+        expectedShipAt: track.expectedShipAt,
+        inTransitAt: track.inTransitAt,
+        expectedArriveAt: track.expectedArriveAt,
+        actualArriveAt: track.actualArriveAt,
+        receiptBatchNo: track.receiptBatchNo,
+        todoNote: track.todoNote,
+        nextFollowUpAt: track.nextFollowUpAt,
+        note: track.note,
+        receiptBatchId: track.receiptBatchId,
+      })),
       pendingBatches: pendingBatches.map((batch) => {
         const allocationsByMaterialId = new Map<string, number>();
         batch.sharedAllocations.forEach((allocation) => {
@@ -107,16 +200,18 @@ export class OperationsService {
         });
 
         const sharedRequirements = batch.bomVersion.items
-          .filter((item) => item.isSharedMaterial)
           .map((item) => {
             const allocatedQty = allocationsByMaterialId.get(item.materialId) ?? 0;
 
             return {
               materialId: item.materialId,
               materialName: item.material.materialName,
+              isSharedMaterial: item.isSharedMaterial,
               requiredQty: item.unitUsage * batch.plannedQty,
-              allocatedQty,
-              remainingQty: Math.max(item.unitUsage * batch.plannedQty - allocatedQty, 0),
+              allocatedQty: item.isSharedMaterial ? allocatedQty : 0,
+              remainingQty: item.isSharedMaterial
+                ? Math.max(item.unitUsage * batch.plannedQty - allocatedQty, 0)
+                : 0,
             };
           });
 
@@ -129,6 +224,14 @@ export class OperationsService {
           plannedQty: batch.plannedQty,
           predictedLaunchDate: batch.predictedLaunchDate,
           blockingReason: batch.blockingReason,
+          actual: batch.actual
+            ? {
+                startAt: batch.actual.actualStartAt,
+                finishAt: batch.actual.actualFinishAt,
+                launchAt: batch.actual.actualLaunchAt,
+                launchQty: batch.actual.actualLaunchQty,
+              }
+            : null,
           sharedRequirements,
         };
       }),
@@ -233,6 +336,151 @@ export class OperationsService {
     };
   }
 
+  async createProcurementTrack(
+    dto: CreateProcurementTrackDto,
+    currentUser: { id: string; role: UserRole },
+  ) {
+    const [product, material] = await Promise.all([
+      this.prisma.product.findUnique({ where: { id: dto.productId } }),
+      this.prisma.material.findUnique({ where: { id: dto.materialId } }),
+    ]);
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+    if (!material) {
+      throw new NotFoundException('Material not found');
+    }
+
+    return this.prisma.materialProcurementTrack.create({
+      data: {
+        productId: dto.productId,
+        materialId: dto.materialId,
+        purchaserUserId: currentUser.id,
+        requiredQty: dto.requiredQty,
+        orderedQty: dto.orderedQty,
+        orderStatus:
+          dto.orderedQty > 0
+            ? ProcurementOrderStatus.ORDERED
+            : ProcurementOrderStatus.NOT_ORDERED,
+        productionStatus: ProcurementProductionStatus.NOT_STARTED,
+        expectedShipAt: parseOptionalDate(dto.expectedShipAt),
+        expectedArriveAt: parseOptionalDate(dto.expectedArriveAt),
+        nextFollowUpAt: parseOptionalDate(dto.nextFollowUpAt),
+        todoNote: dto.todoNote,
+        note: dto.note,
+      },
+    });
+  }
+
+  async updateProcurementTrack(
+    id: string,
+    dto: UpdateProcurementTrackDto,
+    currentUser: { id: string; role: UserRole },
+  ) {
+    const track = await this.prisma.materialProcurementTrack.findUnique({
+      where: { id },
+    });
+
+    if (!track) {
+      throw new NotFoundException('Procurement track not found');
+    }
+    if (
+      currentUser.role === UserRole.PURCHASER &&
+      track.purchaserUserId !== currentUser.id
+    ) {
+      throw new BadRequestException('Current user cannot update this procurement track');
+    }
+
+    return this.prisma.materialProcurementTrack.update({
+      where: { id },
+      data: {
+        orderedQty: dto.orderedQty,
+        orderStatus: dto.orderStatus,
+        productionStatus: dto.productionStatus,
+        expectedShipAt: parseOptionalDate(dto.expectedShipAt),
+        inTransitAt: parseOptionalDate(dto.inTransitAt),
+        expectedArriveAt: parseOptionalDate(dto.expectedArriveAt),
+        nextFollowUpAt: parseOptionalDate(dto.nextFollowUpAt),
+        todoNote: dto.todoNote,
+        note: dto.note,
+      },
+    });
+  }
+
+  async confirmProcurementArrival(
+    id: string,
+    dto: ConfirmProcurementArrivalDto,
+    currentUser: { id: string; role: UserRole },
+  ) {
+    const track = await this.prisma.materialProcurementTrack.findUnique({
+      where: { id },
+      include: {
+        material: true,
+      },
+    });
+
+    if (!track) {
+      throw new NotFoundException('Procurement track not found');
+    }
+    if (
+      currentUser.role === UserRole.PURCHASER &&
+      track.purchaserUserId !== currentUser.id
+    ) {
+      throw new BadRequestException('Current user cannot confirm this procurement track');
+    }
+
+    const bomUsage = await this.prisma.bomItem.findFirst({
+      where: {
+        materialId: track.materialId,
+        bomVersion: {
+          productId: track.productId,
+          isActive: true,
+        },
+      },
+    });
+
+    return this.prisma.$transaction(async (tx) => {
+      const receipt = await tx.materialReceiptBatch.create({
+        data: {
+          materialId: track.materialId,
+          receiptBatchNo: dto.receiptBatchNo,
+          arrivedQty: dto.arrivedQty,
+          arrivedAt: new Date(dto.arrivedAt),
+          purchaserUserId: currentUser.id,
+          sourceType: 'PURCHASE',
+          note: dto.note,
+        },
+      });
+
+      if (bomUsage && !bomUsage.isSharedMaterial) {
+        await tx.receiptBatchLink.create({
+          data: {
+            receiptBatchId: receipt.id,
+            productId: track.productId,
+            linkedQty: dto.arrivedQty,
+          },
+        });
+      }
+
+      return tx.materialProcurementTrack.update({
+        where: { id },
+        data: {
+          receiptBatchId: receipt.id,
+          receiptBatchNo: dto.receiptBatchNo,
+          arrivedQty: track.arrivedQty + dto.arrivedQty,
+          actualArriveAt: new Date(dto.arrivedAt),
+          productionStatus: ProcurementProductionStatus.ARRIVED,
+          orderStatus:
+            track.arrivedQty + dto.arrivedQty >= track.requiredQty
+              ? ProcurementOrderStatus.COMPLETED
+              : ProcurementOrderStatus.PARTIAL,
+          note: dto.note ?? track.note,
+        },
+      });
+    });
+  }
+
   async createAllocation(
     dto: CreateAllocationDto,
     currentUser: { id: string; role: UserRole },
@@ -314,6 +562,76 @@ export class OperationsService {
     return allocation;
   }
 
+  async createBomVersion(dto: CreateBomVersionDto) {
+    const product = await this.prisma.product.findUnique({
+      where: { id: dto.productId },
+    });
+
+    if (!product) {
+      throw new NotFoundException('Product not found');
+    }
+
+    const materialIds = [...new Set(dto.items.map((item) => item.materialId))];
+    if (materialIds.length !== dto.items.length) {
+      throw new BadRequestException('BOM cannot contain duplicate materials');
+    }
+
+    const materials = await this.prisma.material.findMany({
+      where: {
+        id: {
+          in: materialIds,
+        },
+        status: 'ACTIVE',
+      },
+    });
+
+    if (materials.length !== materialIds.length) {
+      throw new BadRequestException('BOM contains unknown or inactive materials');
+    }
+
+    const activate = dto.activate ?? true;
+    const effectiveFrom = new Date(dto.effectiveFrom);
+
+    return this.prisma.$transaction(async (tx) => {
+      if (activate) {
+        await tx.bomVersion.updateMany({
+          where: {
+            productId: dto.productId,
+            isActive: true,
+          },
+          data: {
+            isActive: false,
+            effectiveTo: effectiveFrom,
+          },
+        });
+      }
+
+      return tx.bomVersion.create({
+        data: {
+          productId: dto.productId,
+          versionNo: dto.versionNo,
+          effectiveFrom,
+          isActive: activate,
+          remark: dto.remark,
+          items: {
+            create: dto.items.map((item) => ({
+              materialId: item.materialId,
+              unitUsage: item.unitUsage,
+              isSharedMaterial: item.isSharedMaterial,
+            })),
+          },
+        },
+        include: {
+          items: {
+            include: {
+              material: true,
+            },
+          },
+        },
+      });
+    });
+  }
+
   async updateBatchStatus(id: string, dto: UpdateBatchStatusDto) {
     const batch = await this.prisma.productionBatch.findUnique({
       where: { id },
@@ -330,4 +648,38 @@ export class OperationsService {
       },
     });
   }
+
+  async updateBatchActual(id: string, dto: UpdateBatchActualDto) {
+    const batch = await this.prisma.productionBatch.findUnique({
+      where: { id },
+    });
+
+    if (!batch) {
+      throw new NotFoundException('Production batch not found');
+    }
+
+    const actualData = {
+      actualStartAt: parseOptionalDate(dto.actualStartAt),
+      actualFinishAt: parseOptionalDate(dto.actualFinishAt),
+      actualLaunchAt: parseOptionalDate(dto.actualLaunchAt),
+      actualLaunchQty: dto.actualLaunchQty,
+    };
+
+    return this.prisma.productionBatchActual.upsert({
+      where: { productionBatchId: id },
+      create: {
+        productionBatchId: id,
+        ...actualData,
+      },
+      update: actualData,
+    });
+  }
+}
+
+function parseOptionalDate(value: string | null | undefined) {
+  if (value === undefined) {
+    return undefined;
+  }
+
+  return value ? new Date(value) : null;
 }

@@ -19,7 +19,10 @@ export function LoginForm() {
       try {
         const result = await login(username, password);
         window.localStorage.setItem(TOKEN_KEY, result.accessToken);
-        window.location.href = '/operations';
+        window.location.href =
+          result.user.role === 'ADMIN' || result.user.role === 'PURCHASER'
+            ? '/operations'
+            : '/';
       } catch {
         setError('登录失败，请检查用户名和密码');
       }
@@ -31,7 +34,7 @@ export function LoginForm() {
       <div className="field-full">
         <h2 className="section-title">登录操作台</h2>
         <p className="muted" style={{ marginTop: 0 }}>
-          当前演示账号：`admin / dev-only`，`purchaser_a / dev-only`
+          当前演示账号：`admin / dev-only`，`purchaser_a / dev-only`，`operator / dev-only`
         </p>
       </div>
       <label className="field">
@@ -55,4 +58,3 @@ export function LoginForm() {
     </form>
   );
 }
-

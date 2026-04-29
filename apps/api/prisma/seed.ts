@@ -1,4 +1,13 @@
-import { PrismaClient, ProductionBatchStatus, RunType, CalcRunStatus, ProductState, UserRole } from '@prisma/client';
+import {
+  CalcRunStatus,
+  PrismaClient,
+  ProcurementOrderStatus,
+  ProcurementProductionStatus,
+  ProductState,
+  ProductionBatchStatus,
+  RunType,
+  UserRole,
+} from '@prisma/client';
 
 const prisma = new PrismaClient();
 
@@ -7,6 +16,7 @@ async function main() {
   await prisma.productionBatchActual.deleteMany();
   await prisma.productSnapshot.deleteMany();
   await prisma.productionBatch.deleteMany();
+  await prisma.materialProcurementTrack.deleteMany();
   await prisma.receiptBatchLink.deleteMany();
   await prisma.materialReceiptBatch.deleteMany();
   await prisma.bomItem.deleteMany();
@@ -31,6 +41,15 @@ async function main() {
       username: 'purchaser_a',
       passwordHash: 'dev-only',
       role: UserRole.PURCHASER,
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      name: '运营查看',
+      username: 'operator',
+      passwordHash: 'dev-only',
+      role: UserRole.VIEWER,
     },
   });
 
@@ -123,11 +142,101 @@ async function main() {
     }),
   ]);
 
+  const [receiptStickerExtra] = await Promise.all([
+    prisma.materialReceiptBatch.create({
+      data: {
+        materialId: commonSticker.id,
+        receiptBatchNo: 'RB-STICKER-002',
+        arrivedQty: 220,
+        arrivedAt: new Date('2026-04-29T09:00:00.000Z'),
+        purchaserUserId: purchaser.id,
+        sourceType: 'PURCHASE',
+        note: '用于测试多批次共用料分配',
+      },
+    }),
+    prisma.materialReceiptBatch.create({
+      data: {
+        materialId: commonSticker.id,
+        receiptBatchNo: 'RB-STICKER-003',
+        arrivedQty: 80,
+        arrivedAt: new Date('2026-04-30T09:00:00.000Z'),
+        purchaserUserId: purchaser.id,
+        sourceType: 'PURCHASE',
+        note: '用于测试共用料余量',
+      },
+    }),
+  ]);
+
   await prisma.receiptBatchLink.createMany({
     data: [
       { receiptBatchId: receiptBottle.id, productId: product.id, linkedQty: 300 },
       { receiptBatchId: receiptCap.id, productId: product.id, linkedQty: 260 },
       { receiptBatchId: receiptBox.id, productId: product.id, linkedQty: 180 },
+    ],
+  });
+
+  await prisma.materialProcurementTrack.createMany({
+    data: [
+      {
+        productId: product.id,
+        materialId: bottle.id,
+        purchaserUserId: purchaser.id,
+        requiredQty: 300,
+        orderedQty: 300,
+        arrivedQty: 300,
+        orderStatus: ProcurementOrderStatus.COMPLETED,
+        productionStatus: ProcurementProductionStatus.ARRIVED,
+        expectedShipAt: new Date('2026-04-24T08:00:00.000Z'),
+        expectedArriveAt: new Date('2026-04-26T08:00:00.000Z'),
+        actualArriveAt: new Date('2026-04-26T08:00:00.000Z'),
+        receiptBatchId: receiptBottle.id,
+        receiptBatchNo: receiptBottle.receiptBatchNo,
+      },
+      {
+        productId: product.id,
+        materialId: cap.id,
+        purchaserUserId: purchaser.id,
+        requiredQty: 260,
+        orderedQty: 260,
+        arrivedQty: 260,
+        orderStatus: ProcurementOrderStatus.COMPLETED,
+        productionStatus: ProcurementProductionStatus.ARRIVED,
+        expectedShipAt: new Date('2026-04-24T08:00:00.000Z'),
+        expectedArriveAt: new Date('2026-04-26T08:00:00.000Z'),
+        actualArriveAt: new Date('2026-04-26T08:00:00.000Z'),
+        receiptBatchId: receiptCap.id,
+        receiptBatchNo: receiptCap.receiptBatchNo,
+      },
+      {
+        productId: product.id,
+        materialId: outerBox.id,
+        purchaserUserId: purchaser.id,
+        requiredQty: 180,
+        orderedQty: 180,
+        arrivedQty: 180,
+        orderStatus: ProcurementOrderStatus.COMPLETED,
+        productionStatus: ProcurementProductionStatus.ARRIVED,
+        expectedShipAt: new Date('2026-04-25T08:00:00.000Z'),
+        expectedArriveAt: new Date('2026-04-27T08:00:00.000Z'),
+        actualArriveAt: new Date('2026-04-27T08:00:00.000Z'),
+        receiptBatchId: receiptBox.id,
+        receiptBatchNo: receiptBox.receiptBatchNo,
+      },
+      {
+        productId: product.id,
+        materialId: commonSticker.id,
+        purchaserUserId: purchaser.id,
+        requiredQty: 150,
+        orderedQty: 150,
+        arrivedQty: 150,
+        orderStatus: ProcurementOrderStatus.COMPLETED,
+        productionStatus: ProcurementProductionStatus.ARRIVED,
+        expectedShipAt: new Date('2026-04-25T08:00:00.000Z'),
+        expectedArriveAt: new Date('2026-04-27T08:00:00.000Z'),
+        actualArriveAt: new Date('2026-04-27T08:00:00.000Z'),
+        receiptBatchId: receiptSticker.id,
+        receiptBatchNo: receiptSticker.receiptBatchNo,
+      },
     ],
   });
 
@@ -155,6 +264,51 @@ async function main() {
     },
   });
 
+  const [batch2] = await Promise.all([
+    prisma.productionBatch.create({
+      data: {
+        productId: product.id,
+        bomVersionId: bom.id,
+        batchNo: 'PB-0002',
+        plannedQty: 80,
+        batchStatus: ProductionBatchStatus.PENDING,
+        predictedStartDate: new Date('2026-04-30T02:00:00.000Z'),
+        predictedFinishDate: new Date('2026-05-05T02:00:00.000Z'),
+        predictedLaunchDate: new Date('2026-05-07T02:00:00.000Z'),
+        generatedByRunId: run.id,
+        blockingReason: '待分配通用贴纸',
+      },
+    }),
+    prisma.productionBatch.create({
+      data: {
+        productId: product.id,
+        bomVersionId: bom.id,
+        batchNo: 'PB-0003',
+        plannedQty: 120,
+        batchStatus: ProductionBatchStatus.PAUSED,
+        predictedStartDate: new Date('2026-05-01T02:00:00.000Z'),
+        predictedFinishDate: new Date('2026-05-06T02:00:00.000Z'),
+        predictedLaunchDate: new Date('2026-05-08T02:00:00.000Z'),
+        generatedByRunId: run.id,
+        blockingReason: '等待瓶盖补料确认',
+      },
+    }),
+    prisma.productionBatch.create({
+      data: {
+        productId: product.id,
+        bomVersionId: bom.id,
+        batchNo: 'PB-0004',
+        plannedQty: 200,
+        batchStatus: ProductionBatchStatus.PENDING,
+        predictedStartDate: new Date('2026-05-02T02:00:00.000Z'),
+        predictedFinishDate: new Date('2026-05-07T02:00:00.000Z'),
+        predictedLaunchDate: new Date('2026-05-09T02:00:00.000Z'),
+        generatedByRunId: run.id,
+        blockingReason: '大促加单批次，待确认共用料',
+      },
+    }),
+  ]);
+
   await prisma.sharedMaterialAllocation.create({
     data: {
       receiptBatchId: receiptSticker.id,
@@ -162,6 +316,17 @@ async function main() {
       allocatedQty: 150,
       allocatedByUserId: admin.id,
       allocatedAt: new Date('2026-04-28T00:30:00.000Z'),
+    },
+  });
+
+  await prisma.sharedMaterialAllocation.create({
+    data: {
+      receiptBatchId: receiptStickerExtra.id,
+      productionBatchId: batch2.id,
+      allocatedQty: 60,
+      allocatedByUserId: admin.id,
+      allocatedAt: new Date('2026-04-29T10:00:00.000Z'),
+      note: '测试预分配 60',
     },
   });
 
