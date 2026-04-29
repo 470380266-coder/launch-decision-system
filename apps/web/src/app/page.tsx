@@ -27,7 +27,7 @@ export default async function HomePage() {
           <HomeActions />
         </div>
         <h1 style={{ fontSize: '44px', lineHeight: 1.05, maxWidth: 820 }}>
-          直播间上什么品，不再靠口头追问。
+          直播间进度追踪器
         </h1>
         <p className="muted" style={{ fontSize: '16px', maxWidth: 720 }}>
           按分批到料、共用料分配、BOM 当前生效版本与最低开工门槛，汇总单品当前可上架量、短期新增量和下一批预计时间。
