@@ -16,6 +16,7 @@ async function main() {
   await prisma.productionBatchActual.deleteMany();
   await prisma.productSnapshot.deleteMany();
   await prisma.productionBatch.deleteMany();
+  await prisma.procurementTrackReceipt.deleteMany();
   await prisma.materialProcurementTrack.deleteMany();
   await prisma.receiptBatchLink.deleteMany();
   await prisma.materialReceiptBatch.deleteMany();
@@ -55,16 +56,16 @@ async function main() {
 
   const [bottle, cap, outerBox, commonSticker] = await Promise.all([
     prisma.material.create({
-      data: { materialCode: 'MAT-BOTTLE', materialName: '瓶身', unit: 'pcs' },
+      data: { materialCode: 'MAT-BOTTLE', materialName: '瓶身', materialSpec: '120ml PET', unit: 'pcs' },
     }),
     prisma.material.create({
-      data: { materialCode: 'MAT-CAP', materialName: '瓶盖', unit: 'pcs' },
+      data: { materialCode: 'MAT-CAP', materialName: '瓶盖', materialSpec: '24/410 白色', unit: 'pcs' },
     }),
     prisma.material.create({
-      data: { materialCode: 'MAT-BOX', materialName: '彩盒', unit: 'pcs' },
+      data: { materialCode: 'MAT-BOX', materialName: '彩盒', materialSpec: '精华水单支装', unit: 'pcs' },
     }),
     prisma.material.create({
-      data: { materialCode: 'MAT-STICKER', materialName: '通用贴纸', unit: 'pcs' },
+      data: { materialCode: 'MAT-STICKER', materialName: '通用贴纸', materialSpec: '直播渠道通用', unit: 'pcs' },
     }),
   ]);
 
@@ -72,6 +73,8 @@ async function main() {
     data: {
       productCode: 'SKU-LIVE-001',
       productName: '直播爆品精华水',
+      productSpec: '净含量 120ml',
+      unit: '瓶',
       minStartQty: 100,
       standardProductionDays: 5,
       bufferDays: 2,
@@ -175,18 +178,21 @@ async function main() {
     ],
   });
 
-  await prisma.materialProcurementTrack.createMany({
-    data: [
-      {
+  const trackInputs = [
+    {
         productId: product.id,
         materialId: bottle.id,
         purchaserUserId: purchaser.id,
+        supplier: '华东包材一厂',
+        purchaseOrderNo: 'PO-BOTTLE-001',
         requiredQty: 300,
         orderedQty: 300,
         arrivedQty: 300,
         orderStatus: ProcurementOrderStatus.COMPLETED,
         productionStatus: ProcurementProductionStatus.ARRIVED,
+        orderedAt: new Date('2026-04-22T08:00:00.000Z'),
         expectedShipAt: new Date('2026-04-24T08:00:00.000Z'),
+        transitDays: 2,
         expectedArriveAt: new Date('2026-04-26T08:00:00.000Z'),
         actualArriveAt: new Date('2026-04-26T08:00:00.000Z'),
         receiptBatchId: receiptBottle.id,
@@ -196,12 +202,16 @@ async function main() {
         productId: product.id,
         materialId: cap.id,
         purchaserUserId: purchaser.id,
+        supplier: '瓶盖供应商A',
+        purchaseOrderNo: 'PO-CAP-001',
         requiredQty: 260,
         orderedQty: 260,
         arrivedQty: 260,
         orderStatus: ProcurementOrderStatus.COMPLETED,
         productionStatus: ProcurementProductionStatus.ARRIVED,
+        orderedAt: new Date('2026-04-22T08:00:00.000Z'),
         expectedShipAt: new Date('2026-04-24T08:00:00.000Z'),
+        transitDays: 2,
         expectedArriveAt: new Date('2026-04-26T08:00:00.000Z'),
         actualArriveAt: new Date('2026-04-26T08:00:00.000Z'),
         receiptBatchId: receiptCap.id,
@@ -211,12 +221,16 @@ async function main() {
         productId: product.id,
         materialId: outerBox.id,
         purchaserUserId: purchaser.id,
+        supplier: '彩盒彩印厂',
+        purchaseOrderNo: 'PO-BOX-001',
         requiredQty: 180,
         orderedQty: 180,
         arrivedQty: 180,
         orderStatus: ProcurementOrderStatus.COMPLETED,
         productionStatus: ProcurementProductionStatus.ARRIVED,
+        orderedAt: new Date('2026-04-23T08:00:00.000Z'),
         expectedShipAt: new Date('2026-04-25T08:00:00.000Z'),
+        transitDays: 2,
         expectedArriveAt: new Date('2026-04-27T08:00:00.000Z'),
         actualArriveAt: new Date('2026-04-27T08:00:00.000Z'),
         receiptBatchId: receiptBox.id,
@@ -226,17 +240,31 @@ async function main() {
         productId: product.id,
         materialId: commonSticker.id,
         purchaserUserId: purchaser.id,
+        supplier: '标签供应商',
+        purchaseOrderNo: 'PO-STICKER-001',
         requiredQty: 150,
         orderedQty: 150,
         arrivedQty: 150,
         orderStatus: ProcurementOrderStatus.COMPLETED,
         productionStatus: ProcurementProductionStatus.ARRIVED,
+        orderedAt: new Date('2026-04-23T08:00:00.000Z'),
         expectedShipAt: new Date('2026-04-25T08:00:00.000Z'),
+        transitDays: 2,
         expectedArriveAt: new Date('2026-04-27T08:00:00.000Z'),
         actualArriveAt: new Date('2026-04-27T08:00:00.000Z'),
         receiptBatchId: receiptSticker.id,
         receiptBatchNo: receiptSticker.receiptBatchNo,
       },
+  ];
+  const tracks = await Promise.all(
+    trackInputs.map((data) => prisma.materialProcurementTrack.create({ data })),
+  );
+  await prisma.procurementTrackReceipt.createMany({
+    data: [
+      { procurementTrackId: tracks[0].id, receiptBatchId: receiptBottle.id, arrivedQty: 300 },
+      { procurementTrackId: tracks[1].id, receiptBatchId: receiptCap.id, arrivedQty: 260 },
+      { procurementTrackId: tracks[2].id, receiptBatchId: receiptBox.id, arrivedQty: 180 },
+      { procurementTrackId: tracks[3].id, receiptBatchId: receiptSticker.id, arrivedQty: 150 },
     ],
   });
 

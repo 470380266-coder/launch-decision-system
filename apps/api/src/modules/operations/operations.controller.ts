@@ -16,6 +16,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { ConfirmProcurementArrivalDto } from './dto/confirm-procurement-arrival.dto';
 import { CreateAllocationDto } from './dto/create-allocation.dto';
 import { CreateBomVersionDto } from './dto/create-bom-version.dto';
+import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
 import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
@@ -98,6 +99,12 @@ export class OperationsController {
   @Roles(UserRole.ADMIN)
   createBomVersion(@Body() dto: CreateBomVersionDto) {
     return this.operationsService.createBomVersion(dto);
+  }
+
+  @Post('materials')
+  @Roles(UserRole.ADMIN)
+  createMaterial(@Body() dto: CreateMaterialDto) {
+    return this.operationsService.createMaterial(dto);
   }
 
   @Patch('production-batches/:id/status')

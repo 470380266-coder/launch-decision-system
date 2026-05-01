@@ -75,6 +75,8 @@ model Product {
   id                       String   @id @default(cuid())
   productCode              String   @unique
   productName              String
+  productSpec              String?
+  unit                     String   @default("pcs")
   status                   BasicStatus @default(ACTIVE)
   minStartQty              Int
   standardProductionDays   Int
@@ -94,6 +96,7 @@ model Material {
   id                String   @id @default(cuid())
   materialCode      String   @unique
   materialName      String
+  materialSpec      String?
   unit              String
   status            BasicStatus @default(ACTIVE)
   createdAt         DateTime @default(now())
@@ -151,6 +154,7 @@ model MaterialReceiptBatch {
   receiptBatchLinks ReceiptBatchLink[]
   sharedAllocations SharedMaterialAllocation[]
   procurementTracks MaterialProcurementTrack[]
+  procurementTrackReceipts ProcurementTrackReceipt[]
 }
 
 model MaterialProcurementTrack {
@@ -159,18 +163,23 @@ model MaterialProcurementTrack {
   materialId            String
   purchaserUserId       String
   receiptBatchId        String?
+  supplier              String?
+  purchaseOrderNo       String?
   requiredQty           Int
   orderedQty            Int
   arrivedQty            Int      @default(0)
   orderStatus           ProcurementOrderStatus @default(NOT_ORDERED)
   productionStatus      ProcurementProductionStatus @default(NOT_STARTED)
+  orderedAt             DateTime?
   expectedShipAt        DateTime?
   inTransitAt           DateTime?
+  transitDays           Int?
   expectedArriveAt      DateTime?
   actualArriveAt        DateTime?
   receiptBatchNo        String?
   todoNote              String?
   nextFollowUpAt        DateTime?
+  exceptionNote         String?
   note                  String?
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
@@ -179,6 +188,21 @@ model MaterialProcurementTrack {
   material              Material @relation(fields: [materialId], references: [id])
   purchaser             User @relation(fields: [purchaserUserId], references: [id])
   receiptBatch          MaterialReceiptBatch? @relation(fields: [receiptBatchId], references: [id])
+  receiptLinks          ProcurementTrackReceipt[]
+}
+
+model ProcurementTrackReceipt {
+  id                    String   @id @default(cuid())
+  procurementTrackId    String
+  receiptBatchId        String
+  arrivedQty            Int
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  procurementTrack      MaterialProcurementTrack @relation(fields: [procurementTrackId], references: [id])
+  receiptBatch          MaterialReceiptBatch @relation(fields: [receiptBatchId], references: [id])
+
+  @@unique([procurementTrackId, receiptBatchId])
 }
 
 model ReceiptBatchLink {

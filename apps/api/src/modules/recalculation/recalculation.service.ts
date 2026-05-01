@@ -9,10 +9,14 @@ import {
 import { PrismaService } from '../shared/prisma.service';
 
 type ProductMaterialCapacity = {
-  materialId: string;
   materialName: string;
   capacity: number;
   limiting: boolean;
+};
+
+type CandidateBatchPlan = {
+  plannedQty: number;
+  nonSharedCapacities: ProductMaterialCapacity[];
 };
 
 @Injectable()
@@ -66,12 +70,14 @@ export class RecalculationService {
           continue;
         }
 
-        const capacities = await this.calculateCapacities(product.id, activeBom.items);
-        const plannedQty = capacities.length
-          ? Math.min(...capacities.map((item) => item.capacity))
-          : 0;
+        const batchPlan = await this.calculateCandidateBatchPlan(
+          product.id,
+          product.minStartQty,
+          activeBom.items,
+        );
+        const plannedQty = batchPlan.plannedQty;
 
-        const limitingMaterials = capacities
+        const limitingMaterials = batchPlan.nonSharedCapacities
           .filter((item) => item.limiting)
           .map((item) => item.materialName);
 
@@ -84,7 +90,9 @@ export class RecalculationService {
             reasonSummary:
               plannedQty > 0
                 ? `齐套量 ${plannedQty}，未达到最低开工门槛 ${product.minStartQty}`
-                : `缺少可用子料，当前瓶颈：${limitingMaterials.join('、') || '待补料'}`,
+                : `缺少可用非共用料，当前瓶颈：${
+                    limitingMaterials.join('、') || '待补料'
+                  }`,
           });
           continue;
         }
@@ -104,10 +112,13 @@ export class RecalculationService {
           predictedStartDate: now,
           predictedFinishDate,
           predictedLaunchDate,
-          blockingReason: limitingMaterials.length
-            ? `当前瓶颈子料：${limitingMaterials.join('、')}`
-            : null,
+          blockingReason: null,
         });
+        const batchWithSharedReason = await this.syncSharedMaterialBlockingReason(
+          batch.id,
+          activeBom.items,
+          plannedQty,
+        );
 
         const launchableQtyNow = await this.prisma.productionBatch.aggregate({
           where: {
@@ -143,12 +154,13 @@ export class RecalculationService {
           launchableQtyNow: launchableQtyNow._sum.plannedQty ?? 0,
           launchableQtyShortTerm: shortTermIncrement._sum.plannedQty ?? 0,
           productState:
-            batch.batchStatus === ProductionBatchStatus.COMPLETED
+            batchWithSharedReason.batchStatus === ProductionBatchStatus.COMPLETED
               ? ProductState.LAUNCHABLE
               : ProductState.SCHEDULABLE,
-          nextLaunchDate: batch.predictedLaunchDate,
+          nextLaunchDate: batchWithSharedReason.predictedLaunchDate,
           reasonSummary:
-            batch.blockingReason ?? `已形成待生产批次 ${batch.batchNo}，预计可上架`,
+            batchWithSharedReason.blockingReason ??
+            `已形成待生产批次 ${batchWithSharedReason.batchNo}，预计可上架`,
         });
       }
 
@@ -175,60 +187,116 @@ export class RecalculationService {
     }
   }
 
-  private async calculateCapacities(
+  private async calculateCandidateBatchPlan(
     productId: string,
+    minimumCandidateQty: number,
     bomItems: Array<{
       materialId: string;
       unitUsage: number;
       isSharedMaterial: boolean;
       material: { materialName: string };
     }>,
-  ): Promise<ProductMaterialCapacity[]> {
+  ): Promise<CandidateBatchPlan> {
+    const nonSharedItems = bomItems.filter((item) => !item.isSharedMaterial);
+
+    if (!nonSharedItems.length) {
+      return {
+        plannedQty: bomItems.length ? minimumCandidateQty : 0,
+        nonSharedCapacities: [],
+      };
+    }
+
     const capacities: ProductMaterialCapacity[] = [];
 
-    for (const item of bomItems) {
-      let availableQty = 0;
-
-      if (item.isSharedMaterial) {
-        const allocation = await this.prisma.sharedMaterialAllocation.aggregate({
-          where: {
-            productionBatch: {
-              productId,
-              batchStatus: ProductionBatchStatus.PENDING,
-            },
-            receiptBatch: {
-              materialId: item.materialId,
-            },
+    for (const item of nonSharedItems) {
+      const link = await this.prisma.receiptBatchLink.aggregate({
+        where: {
+          productId,
+          receiptBatch: {
+            materialId: item.materialId,
           },
-          _sum: {
-            allocatedQty: true,
-          },
-        });
-        availableQty = allocation._sum.allocatedQty ?? 0;
-      } else {
-        const link = await this.prisma.receiptBatchLink.aggregate({
-          where: {
-            productId,
-            receiptBatch: {
-              materialId: item.materialId,
-            },
-          },
-          _sum: {
-            linkedQty: true,
-          },
-        });
-        availableQty = link._sum.linkedQty ?? 0;
-      }
+        },
+        _sum: {
+          linkedQty: true,
+        },
+      });
+      const availableQty = link._sum.linkedQty ?? 0;
 
       capacities.push({
-        materialId: item.materialId,
         materialName: item.material.materialName,
         capacity: Math.floor(availableQty / item.unitUsage),
-        limiting: availableQty === 0,
+        limiting: Math.floor(availableQty / item.unitUsage) < minimumCandidateQty,
       });
     }
 
-    return capacities;
+    return {
+      plannedQty: Math.min(...capacities.map((item) => item.capacity)),
+      nonSharedCapacities: capacities,
+    };
+  }
+
+  private async syncSharedMaterialBlockingReason(
+    batchId: string,
+    bomItems: Array<{
+      materialId: string;
+      unitUsage: number;
+      isSharedMaterial: boolean;
+      material: { materialName: string };
+    }>,
+    plannedQty: number,
+  ) {
+    const sharedItems = bomItems.filter((item) => item.isSharedMaterial);
+
+    if (!sharedItems.length) {
+      return this.prisma.productionBatch.update({
+        where: { id: batchId },
+        data: { blockingReason: null },
+      });
+    }
+
+    const allocations = await this.prisma.sharedMaterialAllocation.findMany({
+      where: {
+        productionBatchId: batchId,
+      },
+      include: {
+        receiptBatch: {
+          select: {
+            materialId: true,
+          },
+        },
+      },
+    });
+    const allocatedByMaterialId = new Map<string, number>();
+    allocations.forEach((allocation) => {
+      const materialId = allocation.receiptBatch.materialId;
+      allocatedByMaterialId.set(
+        materialId,
+        (allocatedByMaterialId.get(materialId) ?? 0) + allocation.allocatedQty,
+      );
+    });
+
+    const gaps = sharedItems
+      .map((item) => {
+        const requiredQty = item.unitUsage * plannedQty;
+        const allocatedQty = allocatedByMaterialId.get(item.materialId) ?? 0;
+
+        return {
+          materialName: item.material.materialName,
+          remainingQty: Math.max(requiredQty - allocatedQty, 0),
+        };
+      })
+      .filter((item) => item.remainingQty > 0);
+
+    return this.prisma.productionBatch.update({
+      where: { id: batchId },
+      data: {
+        blockingReason: gaps.length
+          ? `待分配共用料：${gaps
+              .map((item) => `${item.materialName}缺${item.remainingQty}`)
+              .join('、')}`
+          : null,
+      },
+    });
   }
 
   private async ensurePredictedBatch(input: {
@@ -255,6 +323,7 @@ export class RecalculationService {
       return this.prisma.productionBatch.update({
         where: { id: existingPending.id },
         data: {
+          bomVersionId: input.bomVersionId,
           plannedQty: input.plannedQty,
           predictedStartDate: input.predictedStartDate,
           predictedFinishDate: input.predictedFinishDate,

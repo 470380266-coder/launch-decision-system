@@ -1,6 +1,7 @@
-import { Injectable, NotFoundException } from '@nestjs/common';
+import { BadRequestException, Injectable, NotFoundException } from '@nestjs/common';
 import { Prisma, ProductState, ProductionBatchStatus } from '@prisma/client';
 import { PrismaService } from '../shared/prisma.service';
+import { CreateProductDto } from './dto/create-product.dto';
 
 const productSnapshotInclude = {
   snapshots: {
@@ -66,6 +67,8 @@ export class ProductsService {
         id: product.id,
         code: product.productCode,
         name: product.productName,
+        spec: product.productSpec,
+        unit: product.unit,
         minStartQty: product.minStartQty,
         standardProductionDays: product.standardProductionDays,
         bufferDays: product.bufferDays,
@@ -95,6 +98,8 @@ export class ProductsService {
       id: product.id,
       code: product.productCode,
       name: product.productName,
+      spec: product.productSpec,
+      unit: product.unit,
       state: snapshot?.productState ?? ProductState.BLOCKED,
       launchableQtyNow: snapshot?.launchableQtyNow ?? 0,
       shortTermIncrementQty: snapshot?.launchableQtyShortTerm ?? 0,
@@ -151,5 +156,70 @@ export class ProductsService {
         })),
     };
   }
-}
 
+  async createProduct(dto: CreateProductDto) {
+    if (dto.bom) {
+      const materialIds = [...new Set(dto.bom.items.map((item) => item.materialId))];
+      if (materialIds.length !== dto.bom.items.length) {
+        throw new BadRequestException('BOM cannot contain duplicate materials');
+      }
+
+      const materials = await this.prisma.material.count({
+        where: {
+          id: {
+            in: materialIds,
+          },
+          status: 'ACTIVE',
+        },
+      });
+
+      if (materials !== materialIds.length) {
+        throw new BadRequestException('BOM contains unknown or inactive materials');
+      }
+    }
+
+    const product = await this.prisma.product.create({
+      data: {
+        productCode: dto.productCode,
+        productName: dto.productName,
+        productSpec: dto.productSpec,
+        unit: dto.unit,
+        minStartQty: dto.minStartQty,
+        standardProductionDays: dto.standardProductionDays,
+        bufferDays: dto.bufferDays,
+        shortWindowDays: dto.shortWindowDays,
+        bomVersions: dto.bom
+          ? {
+              create: {
+                versionNo: dto.bom.versionNo,
+                effectiveFrom: new Date(dto.bom.effectiveFrom),
+                isActive: dto.bom.activate ?? true,
+                remark: dto.bom.remark,
+                items: {
+                  create: dto.bom.items.map((item) => ({
+                    materialId: item.materialId,
+                    unitUsage: item.unitUsage,
+                    isSharedMaterial: item.isSharedMaterial,
+                  })),
+                },
+              },
+            }
+          : undefined,
+      },
+      include: {
+        bomVersions: {
+          include: {
+            items: true,
+          },
+        },
+      },
+    });
+
+    return {
+      id: product.id,
+      code: product.productCode,
+      name: product.productName,
+      bomVersionId: product.bomVersions[0]?.id ?? null,
+    };
+  }
+}

@@ -14,6 +14,14 @@ import {
 
 export class UpdateProcurementTrackDto {
   @IsOptional()
+  @IsString()
+  supplier?: string | null;
+
+  @IsOptional()
+  @IsString()
+  purchaseOrderNo?: string | null;
+
+  @IsOptional()
   @Type(() => Number)
   @IsInt()
   @Min(0)
@@ -29,11 +37,21 @@ export class UpdateProcurementTrackDto {
 
   @IsOptional()
   @IsDateString()
+  orderedAt?: string | null;
+
+  @IsOptional()
+  @IsDateString()
   expectedShipAt?: string | null;
 
   @IsOptional()
   @IsDateString()
   inTransitAt?: string | null;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  transitDays?: number | null;
 
   @IsOptional()
   @IsDateString()
@@ -46,6 +64,10 @@ export class UpdateProcurementTrackDto {
   @IsOptional()
   @IsString()
   todoNote?: string | null;
+
+  @IsOptional()
+  @IsString()
+  exceptionNote?: string | null;
 
   @IsOptional()
   @IsString()

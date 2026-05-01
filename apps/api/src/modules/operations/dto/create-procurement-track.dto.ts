@@ -8,6 +8,14 @@ export class CreateProcurementTrackDto {
   @IsString()
   materialId!: string;
 
+  @IsOptional()
+  @IsString()
+  supplier?: string;
+
+  @IsOptional()
+  @IsString()
+  purchaseOrderNo?: string;
+
   @Type(() => Number)
   @IsInt()
   @Min(1)
@@ -20,7 +28,17 @@ export class CreateProcurementTrackDto {
 
   @IsOptional()
   @IsDateString()
+  orderedAt?: string;
+
+  @IsOptional()
+  @IsDateString()
   expectedShipAt?: string;
+
+  @IsOptional()
+  @Type(() => Number)
+  @IsInt()
+  @Min(0)
+  transitDays?: number;
 
   @IsOptional()
   @IsDateString()
@@ -33,6 +51,10 @@ export class CreateProcurementTrackDto {
   @IsOptional()
   @IsString()
   todoNote?: string;
+
+  @IsOptional()
+  @IsString()
+  exceptionNote?: string;
 
   @IsOptional()
   @IsString()

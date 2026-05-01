@@ -7,12 +7,15 @@ import {
   ProcurementOrderStatus,
   ProcurementProductionStatus,
   ProductionBatchStatus,
+  RunType,
   UserRole,
 } from '@prisma/client';
+import { RecalculationService } from '../recalculation/recalculation.service';
 import { PrismaService } from '../shared/prisma.service';
 import { ConfirmProcurementArrivalDto } from './dto/confirm-procurement-arrival.dto';
 import { CreateAllocationDto } from './dto/create-allocation.dto';
 import { CreateBomVersionDto } from './dto/create-bom-version.dto';
+import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
 import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
@@ -21,7 +24,10 @@ import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
 
 @Injectable()
 export class OperationsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly recalculationService: RecalculationService,
+  ) {}
 
   async getBootstrapData(user: { id: string; role: UserRole }) {
     const [
@@ -76,6 +82,14 @@ export class OperationsService {
             material: true,
             purchaser: true,
             receiptBatch: true,
+            receiptLinks: {
+              include: {
+                receiptBatch: true,
+              },
+              orderBy: {
+                createdAt: 'desc',
+              },
+            },
           },
           orderBy: [
             { nextFollowUpAt: 'asc' },
@@ -86,12 +100,24 @@ export class OperationsService {
         this.prisma.productionBatch.findMany({
           where: {
             batchStatus: {
-              in: [ProductionBatchStatus.PENDING, ProductionBatchStatus.PAUSED],
+              in: [
+                ProductionBatchStatus.PENDING,
+                ProductionBatchStatus.PAUSED,
+                ProductionBatchStatus.COMPLETED,
+              ],
             },
           },
           include: {
             actual: true,
-            product: true,
+            product: {
+              include: {
+                receiptBatchLinks: {
+                  include: {
+                    receiptBatch: true,
+                  },
+                },
+              },
+            },
             bomVersion: {
               include: {
                 items: {
@@ -130,12 +156,15 @@ export class OperationsService {
         id: material.id,
         code: material.materialCode,
         name: material.materialName,
+        spec: material.materialSpec,
         unit: material.unit,
       })),
       products: products.map((product) => ({
         id: product.id,
         code: product.productCode,
         name: product.productName,
+        spec: product.productSpec,
+        unit: product.unit,
       })),
       purchasers: purchasers.map((user) => ({
         id: user.id,
@@ -163,6 +192,8 @@ export class OperationsService {
           materialId: item.materialId,
           materialCode: item.material.materialCode,
           materialName: item.material.materialName,
+          materialSpec: item.material.materialSpec,
+          materialUnit: item.material.unit,
           unitUsage: item.unitUsage,
           isSharedMaterial: item.isSharedMaterial,
         })),
@@ -172,24 +203,41 @@ export class OperationsService {
         productId: track.productId,
         productCode: track.product.productCode,
         productName: track.product.productName,
+        productSpec: track.product.productSpec,
+        productUnit: track.product.unit,
         materialId: track.materialId,
         materialCode: track.material.materialCode,
         materialName: track.material.materialName,
+        materialSpec: track.material.materialSpec,
+        materialUnit: track.material.unit,
         purchaserName: track.purchaser.name,
+        supplier: track.supplier,
+        purchaseOrderNo: track.purchaseOrderNo,
         requiredQty: track.requiredQty,
         orderedQty: track.orderedQty,
         arrivedQty: track.arrivedQty,
         orderStatus: track.orderStatus,
         productionStatus: track.productionStatus,
+        orderedAt: track.orderedAt,
         expectedShipAt: track.expectedShipAt,
         inTransitAt: track.inTransitAt,
+        transitDays: track.transitDays,
         expectedArriveAt: track.expectedArriveAt,
         actualArriveAt: track.actualArriveAt,
         receiptBatchNo: track.receiptBatchNo,
         todoNote: track.todoNote,
         nextFollowUpAt: track.nextFollowUpAt,
+        exceptionNote: track.exceptionNote,
         note: track.note,
         receiptBatchId: track.receiptBatchId,
+        receiptBatches: track.receiptLinks.map((link) => ({
+          id: link.receiptBatchId,
+          batchNo: link.receiptBatch.receiptBatchNo,
+          arrivedQty: link.arrivedQty,
+          arrivedAt: link.receiptBatch.arrivedAt,
+          sourceType: link.receiptBatch.sourceType,
+          note: link.receiptBatch.note,
+        })),
       })),
       pendingBatches: pendingBatches.map((batch) => {
         const allocationsByMaterialId = new Map<string, number>();
@@ -198,20 +246,47 @@ export class OperationsService {
           const current = allocationsByMaterialId.get(materialId) ?? 0;
           allocationsByMaterialId.set(materialId, current + allocation.allocatedQty);
         });
+        const linkedQtyByMaterialId = new Map<string, number>();
+        batch.product.receiptBatchLinks.forEach((link) => {
+          const materialId = link.receiptBatch.materialId;
+          const current = linkedQtyByMaterialId.get(materialId) ?? 0;
+          linkedQtyByMaterialId.set(materialId, current + link.linkedQty);
+        });
 
         const sharedRequirements = batch.bomVersion.items
           .map((item) => {
             const allocatedQty = allocationsByMaterialId.get(item.materialId) ?? 0;
+            const linkedQty = linkedQtyByMaterialId.get(item.materialId) ?? 0;
 
             return {
               materialId: item.materialId,
               materialName: item.material.materialName,
+              materialSpec: item.material.materialSpec,
+              materialUnit: item.material.unit,
               isSharedMaterial: item.isSharedMaterial,
               requiredQty: item.unitUsage * batch.plannedQty,
               allocatedQty: item.isSharedMaterial ? allocatedQty : 0,
+              linkedQty: item.isSharedMaterial ? 0 : linkedQty,
               remainingQty: item.isSharedMaterial
                 ? Math.max(item.unitUsage * batch.plannedQty - allocatedQty, 0)
                 : 0,
+              procurementTracks: procurementTracks
+                .filter(
+                  (track) =>
+                    track.productId === batch.productId &&
+                    track.materialId === item.materialId,
+                )
+                .map((track) => ({
+                  id: track.id,
+                  supplier: track.supplier,
+                  purchaseOrderNo: track.purchaseOrderNo,
+                  orderedQty: track.orderedQty,
+                  arrivedQty: track.arrivedQty,
+                  orderStatus: track.orderStatus,
+                  productionStatus: track.productionStatus,
+                  expectedArriveAt: track.expectedArriveAt,
+                  exceptionNote: track.exceptionNote,
+                })),
             };
           });
 
@@ -248,6 +323,8 @@ export class OperationsService {
             batchNo: receipt.receiptBatchNo,
             materialId: receipt.materialId,
             materialName: receipt.material.materialName,
+            materialSpec: receipt.material.materialSpec,
+            materialUnit: receipt.material.unit,
             arrivedQty: receipt.arrivedQty,
             arrivedAt: receipt.arrivedAt,
             allocatedQty,
@@ -330,6 +407,8 @@ export class OperationsService {
       });
     }
 
+    await this.recalculateNow();
+
     return {
       id: receipt.id,
       autoLinkedProductId: dto.productId ?? null,
@@ -357,6 +436,8 @@ export class OperationsService {
         productId: dto.productId,
         materialId: dto.materialId,
         purchaserUserId: currentUser.id,
+        supplier: dto.supplier,
+        purchaseOrderNo: dto.purchaseOrderNo,
         requiredQty: dto.requiredQty,
         orderedQty: dto.orderedQty,
         orderStatus:
@@ -364,10 +445,13 @@ export class OperationsService {
             ? ProcurementOrderStatus.ORDERED
             : ProcurementOrderStatus.NOT_ORDERED,
         productionStatus: ProcurementProductionStatus.NOT_STARTED,
+        orderedAt: parseOptionalDate(dto.orderedAt),
         expectedShipAt: parseOptionalDate(dto.expectedShipAt),
+        transitDays: dto.transitDays,
         expectedArriveAt: parseOptionalDate(dto.expectedArriveAt),
         nextFollowUpAt: parseOptionalDate(dto.nextFollowUpAt),
         todoNote: dto.todoNote,
+        exceptionNote: dto.exceptionNote,
         note: dto.note,
       },
     });
@@ -395,14 +479,23 @@ export class OperationsService {
     return this.prisma.materialProcurementTrack.update({
       where: { id },
       data: {
-        orderedQty: dto.orderedQty,
-        orderStatus: dto.orderStatus,
-        productionStatus: dto.productionStatus,
+        orderStatus: deriveOrderStatus(
+          track.arrivedQty,
+          track.orderedQty,
+          dto.orderStatus,
+        ),
+        productionStatus: deriveProductionStatus(
+          track.arrivedQty,
+          track.orderedQty,
+          dto.productionStatus,
+        ),
         expectedShipAt: parseOptionalDate(dto.expectedShipAt),
         inTransitAt: parseOptionalDate(dto.inTransitAt),
+        transitDays: dto.transitDays,
         expectedArriveAt: parseOptionalDate(dto.expectedArriveAt),
         nextFollowUpAt: parseOptionalDate(dto.nextFollowUpAt),
         todoNote: dto.todoNote,
+        exceptionNote: dto.exceptionNote,
         note: dto.note,
       },
     });
@@ -440,7 +533,7 @@ export class OperationsService {
       },
     });
 
-    return this.prisma.$transaction(async (tx) => {
+    const trackUpdate = await this.prisma.$transaction(async (tx) => {
       const receipt = await tx.materialReceiptBatch.create({
         data: {
           materialId: track.materialId,
@@ -463,22 +556,37 @@ export class OperationsService {
         });
       }
 
+      await tx.procurementTrackReceipt.create({
+        data: {
+          procurementTrackId: id,
+          receiptBatchId: receipt.id,
+          arrivedQty: dto.arrivedQty,
+        },
+      });
+
+      const nextArrivedQty = track.arrivedQty + dto.arrivedQty;
+
       return tx.materialProcurementTrack.update({
         where: { id },
         data: {
           receiptBatchId: receipt.id,
           receiptBatchNo: dto.receiptBatchNo,
-          arrivedQty: track.arrivedQty + dto.arrivedQty,
+          arrivedQty: nextArrivedQty,
           actualArriveAt: new Date(dto.arrivedAt),
-          productionStatus: ProcurementProductionStatus.ARRIVED,
-          orderStatus:
-            track.arrivedQty + dto.arrivedQty >= track.requiredQty
-              ? ProcurementOrderStatus.COMPLETED
-              : ProcurementOrderStatus.PARTIAL,
+          productionStatus: deriveProductionStatus(
+            nextArrivedQty,
+            track.orderedQty,
+            track.productionStatus,
+          ),
+          orderStatus: deriveOrderStatus(nextArrivedQty, track.orderedQty),
           note: dto.note ?? track.note,
         },
       });
     });
+
+    await this.recalculateNow();
+
+    return trackUpdate;
   }
 
   async createAllocation(
@@ -559,6 +667,8 @@ export class OperationsService {
       },
     });
 
+    await this.recalculateNow();
+
     return allocation;
   }
 
@@ -592,7 +702,7 @@ export class OperationsService {
     const activate = dto.activate ?? true;
     const effectiveFrom = new Date(dto.effectiveFrom);
 
-    return this.prisma.$transaction(async (tx) => {
+    const bom = await this.prisma.$transaction(async (tx) => {
       if (activate) {
         await tx.bomVersion.updateMany({
           where: {
@@ -630,6 +740,31 @@ export class OperationsService {
         },
       });
     });
+
+    if (activate) {
+      await this.recalculateNow();
+    }
+
+    return bom;
+  }
+
+  async createMaterial(dto: CreateMaterialDto) {
+    const material = await this.prisma.material.create({
+      data: {
+        materialCode: dto.materialCode,
+        materialName: dto.materialName,
+        materialSpec: dto.materialSpec,
+        unit: dto.unit,
+      },
+    });
+
+    return {
+      id: material.id,
+      code: material.materialCode,
+      name: material.materialName,
+      spec: material.materialSpec,
+      unit: material.unit,
+    };
   }
 
   async updateBatchStatus(id: string, dto: UpdateBatchStatusDto) {
@@ -674,6 +809,10 @@ export class OperationsService {
       update: actualData,
     });
   }
+
+  private async recalculateNow() {
+    await this.recalculationService.run(RunType.MANUAL);
+  }
 }
 
 function parseOptionalDate(value: string | null | undefined) {
@@ -682,4 +821,34 @@ function parseOptionalDate(value: string | null | undefined) {
   }
 
   return value ? new Date(value) : null;
+}
+
+function deriveOrderStatus(
+  arrivedQty: number,
+  orderedQty: number,
+  fallback?: ProcurementOrderStatus,
+) {
+  if (arrivedQty <= 0) {
+    return fallback;
+  }
+
+  return arrivedQty < orderedQty
+    ? ProcurementOrderStatus.PARTIAL
+    : ProcurementOrderStatus.COMPLETED;
+}
+
+function deriveProductionStatus(
+  arrivedQty: number,
+  orderedQty: number,
+  fallback?: ProcurementProductionStatus,
+) {
+  if (orderedQty > 0 && arrivedQty >= orderedQty) {
+    return ProcurementProductionStatus.ARRIVED;
+  }
+
+  if (arrivedQty > 0 && fallback === ProcurementProductionStatus.ARRIVED) {
+    return ProcurementProductionStatus.SHIPPED;
+  }
+
+  return fallback;
 }
