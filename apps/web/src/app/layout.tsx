@@ -1,5 +1,6 @@
 import './globals.css';
 import type { Metadata } from 'next';
+import { RouteTransition } from '@/components/page-transition';
 
 export const metadata: Metadata = {
   title: '上架决策系统 V1',
@@ -13,8 +14,9 @@ export default function RootLayout({
 }>) {
   return (
     <html lang="zh-CN">
-      <body>{children}</body>
+      <body>
+        <RouteTransition>{children}</RouteTransition>
+      </body>
     </html>
   );
 }
-

@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { Fragment, useEffect, useMemo, useState, useTransition } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
 import {
   confirmProcurementArrival,
   createAllocation,
@@ -14,6 +14,8 @@ import {
   updateProcurementTrack,
 } from '@/lib/api';
 import { AuthUser, OperationBootstrap } from '@/lib/types';
+import { PageTransition } from '@/components/page-transition';
+import { FormField, Modal, inputCls, selectCls } from '@/components/modal';
 
 const TOKEN_KEY = 'launch-decision-token';
 
@@ -53,9 +55,19 @@ function roleName(role: AuthUser['role']) {
     return '管理员';
   }
   if (role === 'PURCHASER') {
-    return '采购';
+    return '采购员';
   }
-  return '运营查看';
+  return '运营';
+}
+
+function roleViewLabel(role: AuthUser['role']) {
+  if (role === 'ADMIN') {
+    return '批次工作台';
+  }
+  if (role === 'PURCHASER') {
+    return '采购工作台';
+  }
+  return '上架决策看板';
 }
 
 const orderStatusLabels: Record<
@@ -89,6 +101,48 @@ function procurementStatusClass(
     return 'status-schedulable';
   }
   return 'status-blocked';
+}
+
+function purchaseStatusLabel(track: OperationBootstrap['procurementTracks'][number]) {
+  if (track.productionStatus === 'ARRIVED') {
+    return '全部到货';
+  }
+  if (track.arrivedQty > 0) {
+    return '部分到货';
+  }
+  if (track.orderStatus === 'NOT_ORDERED' || track.productionStatus === 'NOT_STARTED') {
+    return '缺货';
+  }
+  if (track.orderStatus === 'ORDERED' || track.orderStatus === 'COMPLETED') {
+    return '已下单';
+  }
+  return productionStatusLabels[track.productionStatus];
+}
+
+function purchaseDeltaText(track: OperationBootstrap['procurementTracks'][number]) {
+  if (!track.expectedArriveAt || !track.actualArriveAt) {
+    return '待确认';
+  }
+
+  const expected = new Date(track.expectedArriveAt).getTime();
+  const actual = new Date(track.actualArriveAt).getTime();
+  const diffDays = Math.ceil((actual - expected) / 86_400_000);
+
+  if (diffDays > 0) {
+    return `延期 ${diffDays} 天`;
+  }
+  return `提前 ${Math.abs(diffDays)} 天`;
+}
+
+function shortDate(input: string | null) {
+  if (!input) {
+    return '待确认';
+  }
+
+  return new Intl.DateTimeFormat('zh-CN', {
+    month: '2-digit',
+    day: '2-digit',
+  }).format(new Date(input));
 }
 
 function isTrackSharedMaterial(
@@ -160,53 +214,73 @@ export function OperationsConsole({
   }
 
   if (authLoading) {
-    return <div className="panel list-card muted">正在校验登录状态...</div>;
+    return (
+      <main className="ops-page">
+        <div className="ops-auth-card">正在校验登录状态...</div>
+      </main>
+    );
   }
 
   if (!token || !user) {
     return (
-      <div className="panel list-card">
+      <main className="ops-page">
+      <div className="ops-auth-card">
         <p className="muted">你还没有登录，或登录状态已失效。</p>
-        <Link href="/login" className="action-button" style={{ display: 'inline-flex' }}>
+        <Link href="/login" className="ops-primary-button">
           去登录
         </Link>
       </div>
+      </main>
     );
   }
 
   if (user.role === 'VIEWER') {
     return (
-      <div className="panel list-card">
+      <main className="ops-page">
+      <div className="ops-auth-card">
         <p className="muted">当前账号仅可查看上架决策看板，无操作台权限。</p>
-        <Link href="/" className="secondary-button" style={{ display: 'inline-flex' }}>
+        <Link href="/" className="ops-secondary-button">
           返回看板
         </Link>
       </div>
+      </main>
     );
   }
 
   if (!data) {
-    return <div className="panel list-card muted">正在加载工作台数据...</div>;
+    return (
+      <main className="ops-page">
+        <div className="ops-auth-card">正在加载工作台数据...</div>
+      </main>
+    );
   }
 
   return (
-    <div className="ops-console-layout">
-      <section className="ops-main-column">
-        <div className="ops-workbench-header">
-          <div>
-            <h1>
-              {user.role === 'PURCHASER'
-                ? '采购跟进子物料'
-                : '管理员管理批次和单品'}
-            </h1>
-            <p className="muted">
-              {user.role === 'PURCHASER'
-                ? '按子物料维护下单、生产、发货、在途和到货确认。'
-                : '按生产批次处理共用料、批次状态和实际结果，并在单品管理里维护 BOM。'}
-            </p>
+    <main className="ops-page">
+      <header className="home-topbar">
+        <div className="home-topbar-inner">
+          <div className="home-brand">
+            <span className="home-brand-mark">备</span>
+            <span>直播间备货系统</span>
+            <span className="home-breadcrumb-separator">/</span>
+            <span className="home-breadcrumb-current">{roleViewLabel(user.role)}</span>
+          </div>
+          <div className="home-account-panel">
+            <span className="home-role-badge">{roleName(user.role)}</span>
+            <span className="home-username">{user.username}</span>
+            <button className="home-logout-button" onClick={logout} type="button">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M10 6H6v12h4" />
+                <path d="M14 8l4 4-4 4" />
+                <path d="M8 12h10" />
+              </svg>
+              退出
+            </button>
           </div>
         </div>
+      </header>
 
+      <div className="ops-page-content">
         {(message || error) && (
           <div className="ops-message-row">
             {message ? <div className="success-text">{message}</div> : null}
@@ -235,27 +309,8 @@ export function OperationsConsole({
             token={token}
           />
         )}
-      </section>
-
-      <aside className="ops-side-column">
-        <div className="ops-side-section">
-          <div className="ops-account-card">
-            <div>
-              <div className="field-hint">当前登录</div>
-              <strong>
-                {user.name} · {roleName(user.role)}
-              </strong>
-              <div className="field-hint">{user.username}</div>
-            </div>
-            <button className="secondary-button" onClick={logout} type="button">
-              退出
-            </button>
-          </div>
-        </div>
-
-        <SidePanel data={data} user={user} />
-      </aside>
-    </div>
+      </div>
+    </main>
   );
 }
 
@@ -392,12 +447,15 @@ function ProcurementWorkspace({
     note: '',
   });
   const [filter, setFilter] = useState<
-    'ALL' | 'TODO' | OperationBootstrap['procurementTracks'][number]['productionStatus']
-  >('TODO');
+    'ALL' | 'TODO' | 'ORDERED' | 'PARTIAL' | 'ARRIVED' | 'SHORT'
+  >('ALL');
+  const [search, setSearch] = useState('');
   const [showCreateTrack, setShowCreateTrack] = useState(false);
 
   function openEdit(track: OperationBootstrap['procurementTracks'][number]) {
+    setShowCreateTrack(false);
     setEditTrackId(track.id);
+    setArrivalTrackId(track.id);
     setEditForm({
       orderedQty: track.orderedQty,
       orderStatus: track.orderStatus,
@@ -408,6 +466,12 @@ function ProcurementWorkspace({
       nextFollowUpAt: toDateTimeLocal(track.nextFollowUpAt),
       todoNote: track.todoNote ?? '',
       note: track.note ?? '',
+    });
+    setArrivalForm({
+      receiptBatchNo: track.receiptBatchNo ?? `RB-${track.materialCode}-${Date.now()}`,
+      arrivedQty: Math.max(track.orderedQty - track.arrivedQty, 1),
+      arrivedAt: toDateTimeLocal(track.actualArriveAt) || new Date().toISOString().slice(0, 16),
+      note: '',
     });
   }
 
@@ -433,6 +497,7 @@ function ProcurementWorkspace({
         );
         await onRefresh();
         onMessage('采购跟进已新增');
+        setShowCreateTrack(false);
         setTrackForm((current) => ({
           ...current,
           requiredQty: 1,
@@ -517,482 +582,702 @@ function ProcurementWorkspace({
   const pendingTodos = data.procurementTracks.filter(
     (track) => track.productionStatus !== 'ARRIVED',
   );
+  const orderedCount = data.procurementTracks.filter(
+    (track) => track.orderStatus === 'ORDERED' || track.orderStatus === 'COMPLETED',
+  ).length;
   const filteredTracks = data.procurementTracks.filter((track) => {
+    const normalizedSearch = search.trim().toLowerCase();
+    const matchesSearch =
+      !normalizedSearch ||
+      [
+        track.productName,
+        track.productCode,
+        track.materialName,
+        track.materialCode,
+        track.purchaserName,
+        track.receiptBatchNo ?? '',
+      ]
+        .join(' ')
+        .toLowerCase()
+        .includes(normalizedSearch);
+
+    if (!matchesSearch) {
+      return false;
+    }
+
     if (filter === 'ALL') {
       return true;
     }
     if (filter === 'TODO') {
       return track.productionStatus !== 'ARRIVED';
     }
-    return track.productionStatus === filter;
+    if (filter === 'ORDERED') {
+      return track.orderStatus === 'ORDERED' || track.orderStatus === 'COMPLETED';
+    }
+    if (filter === 'PARTIAL') {
+      return track.arrivedQty > 0 && track.productionStatus !== 'ARRIVED';
+    }
+    if (filter === 'ARRIVED') {
+      return track.productionStatus === 'ARRIVED';
+    }
+    return track.orderStatus === 'NOT_ORDERED' || track.productionStatus === 'NOT_STARTED';
   });
+  const selectedTrack = data.procurementTracks.find((track) => track.id === editTrackId);
+
+  if (selectedTrack) {
+    return (
+      <PageTransition k={`purchase-edit-${selectedTrack.id}`}>
+        <PurchaseEditView
+          arrivalForm={arrivalForm}
+          editForm={editForm}
+          isPending={isPending}
+          onArrivalChange={setArrivalForm}
+          onBack={() => {
+            setEditTrackId(null);
+            setArrivalTrackId(null);
+          }}
+          onConfirmArrival={handleConfirmArrival}
+          onEditChange={setEditForm}
+          onSave={handleUpdateTrack}
+          track={selectedTrack}
+        />
+      </PageTransition>
+    );
+  }
 
   return (
-    <div className="ops-data-section">
-      <div className="ops-table-toolbar">
+    <PageTransition k="purchase-list">
+      <div className="purchase-workspace">
+        <div className="purchase-breadcrumb">
+          <span>角色工作台</span>
+          <span>›</span>
+          <strong>子物料采购台账</strong>
+        </div>
+
+        <section className="purchase-card">
+          <div className="purchase-toolbar">
+            <div className="purchase-toolbar-top">
+              <label className="purchase-search">
+                <span aria-hidden="true">⌕</span>
+                <input
+                  onChange={(event) => setSearch(event.target.value)}
+                  placeholder="单品 / 子物料 / 供应商 / 采购单号"
+                  value={search}
+                />
+              </label>
+              <button
+                className="purchase-create-button"
+                onClick={() => setShowCreateTrack(true)}
+                type="button"
+              >
+                + 新增跟进
+              </button>
+            </div>
+
+            <div className="purchase-filter-row">
+              {[
+                { id: 'ALL', label: '全部' },
+                { id: 'TODO', label: '待跟进', count: pendingTodos.length },
+                { id: 'ORDERED', label: '已下单', count: orderedCount },
+                { id: 'PARTIAL', label: '部分到货' },
+                { id: 'ARRIVED', label: '全部到货' },
+                { id: 'SHORT', label: '缺货' },
+              ].map((item) => (
+                <button
+                  className={filter === item.id ? 'active' : ''}
+                  key={item.id}
+                  onClick={() => setFilter(item.id as typeof filter)}
+                  type="button"
+                >
+                  {item.label}
+                  {'count' in item && item.count != null ? (
+                    <span>{item.count}</span>
+                  ) : null}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="purchase-table-scroll">
+            <table className="purchase-table">
+              <thead>
+                <tr>
+                  <th>单品 / 子物料</th>
+                  <th>供应商 / 采购单</th>
+                  <th>数量</th>
+                  <th>状态</th>
+                  <th>下单时间</th>
+                  <th>预计到货</th>
+                  <th>实际到货</th>
+                  <th>差值</th>
+                  <th>关联编号</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {filteredTracks.length ? (
+                  filteredTracks.map((track) => {
+                    const delta = purchaseDeltaText(track);
+                    const statusLabel = purchaseStatusLabel(track);
+                    return (
+                      <tr key={track.id}>
+                        <td>
+                          <strong>{track.materialName}</strong>
+                          <div>{track.materialCode}</div>
+                        </td>
+                        <td>
+                          <strong>{track.purchaserName}</strong>
+                          <div>{track.receiptBatchNo ?? `PO-${track.materialCode}`}</div>
+                        </td>
+                        <td>{track.orderedQty || track.requiredQty} pcs</td>
+                        <td>
+                          <span
+                            className={`purchase-status ${
+                              statusLabel === '全部到货'
+                                ? 'purchase-status-arrived'
+                                : statusLabel === '缺货'
+                                  ? 'purchase-status-short'
+                                  : ''
+                            }`}
+                          >
+                            {statusLabel}
+                          </span>
+                        </td>
+                        <td>{formatDate(track.expectedShipAt)}</td>
+                        <td>{formatDate(track.expectedArriveAt)}</td>
+                        <td>{shortDate(track.actualArriveAt)}</td>
+                        <td
+                          className={
+                            delta.startsWith('延期')
+                              ? 'purchase-delay'
+                              : delta.startsWith('提前')
+                                ? 'purchase-early'
+                                : 'purchase-muted'
+                          }
+                        >
+                          {delta}
+                        </td>
+                        <td>{track.receiptBatchNo ?? '-'}</td>
+                        <td>
+                          <button onClick={() => openEdit(track)} type="button">
+                            编辑
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })
+                ) : (
+                  <tr>
+                    <td className="purchase-empty" colSpan={10}>
+                      当前筛选下暂无采购跟进记录。
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+
+        <Modal
+          footer={
+            <>
+              <button
+                className="modal-quiet-button"
+                onClick={() => setShowCreateTrack(false)}
+                type="button"
+              >
+                取消
+              </button>
+              <button
+                className="modal-primary-button"
+                disabled={isPending}
+                form="create-procurement-track"
+                type="submit"
+              >
+                保存跟进
+              </button>
+            </>
+          }
+          onClose={() => setShowCreateTrack(false)}
+          open={showCreateTrack}
+          title="新增跟进"
+          width={720}
+        >
+          <form
+            className="purchase-create-form"
+            id="create-procurement-track"
+            onSubmit={handleCreateTrack}
+          >
+            <FormField label="单品" required>
+              <select
+                className={selectCls}
+                value={trackForm.productId}
+                onChange={(event) =>
+                  setTrackForm((current) => ({ ...current, productId: event.target.value }))
+                }
+              >
+                {data.products.map((product) => (
+                  <option key={product.id} value={product.id}>
+                    {product.code} · {product.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="子物料" required>
+              <select
+                className={selectCls}
+                value={trackForm.materialId}
+                onChange={(event) =>
+                  setTrackForm((current) => ({ ...current, materialId: event.target.value }))
+                }
+              >
+                {data.materials.map((material) => (
+                  <option key={material.id} value={material.id}>
+                    {material.code} · {material.name}
+                  </option>
+                ))}
+              </select>
+            </FormField>
+            <FormField label="需求数量">
+              <input
+                className={inputCls}
+                min={1}
+                type="number"
+                value={trackForm.requiredQty}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    requiredQty: Number(event.target.value),
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="下单数量">
+              <input
+                className={inputCls}
+                min={0}
+                type="number"
+                value={trackForm.orderedQty}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    orderedQty: Number(event.target.value),
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="预计发货">
+              <input
+                className={inputCls}
+                type="datetime-local"
+                value={trackForm.expectedShipAt}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    expectedShipAt: event.target.value,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="预计到货">
+              <input
+                className={inputCls}
+                type="datetime-local"
+                value={trackForm.expectedArriveAt}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    expectedArriveAt: event.target.value,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="下次跟进">
+              <input
+                className={inputCls}
+                type="datetime-local"
+                value={trackForm.nextFollowUpAt}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    nextFollowUpAt: event.target.value,
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="待办提醒">
+              <input
+                className={inputCls}
+                value={trackForm.todoNote}
+                onChange={(event) =>
+                  setTrackForm((current) => ({ ...current, todoNote: event.target.value }))
+                }
+              />
+            </FormField>
+          </form>
+        </Modal>
+      </div>
+    </PageTransition>
+  );
+}
+
+function PurchaseEditView({
+  arrivalForm,
+  editForm,
+  isPending,
+  onArrivalChange,
+  onBack,
+  onConfirmArrival,
+  onEditChange,
+  onSave,
+  track,
+}: {
+  arrivalForm: {
+    receiptBatchNo: string;
+    arrivedQty: number;
+    arrivedAt: string;
+    note: string;
+  };
+  editForm: {
+    orderedQty: number;
+    orderStatus: string;
+    productionStatus: string;
+    expectedShipAt: string;
+    inTransitAt: string;
+    expectedArriveAt: string;
+    nextFollowUpAt: string;
+    todoNote: string;
+    note: string;
+  };
+  isPending: boolean;
+  onArrivalChange: React.Dispatch<
+    React.SetStateAction<{
+      receiptBatchNo: string;
+      arrivedQty: number;
+      arrivedAt: string;
+      note: string;
+    }>
+  >;
+  onBack: () => void;
+  onConfirmArrival: (event: React.FormEvent<HTMLFormElement>) => void;
+  onEditChange: React.Dispatch<
+    React.SetStateAction<{
+      orderedQty: number;
+      orderStatus: string;
+      productionStatus: string;
+      expectedShipAt: string;
+      inTransitAt: string;
+      expectedArriveAt: string;
+      nextFollowUpAt: string;
+      todoNote: string;
+      note: string;
+    }>
+  >;
+  onSave: (event: React.FormEvent<HTMLFormElement>) => void;
+  track: OperationBootstrap['procurementTracks'][number];
+}) {
+  const inboundRows =
+    track.arrivedQty > 0
+      ? [
+          {
+            code: track.receiptBatchNo ?? '-',
+            note: track.note || '无',
+            qty: `${track.arrivedQty} pcs`,
+            source: 'PURCHASE',
+            time: formatDate(track.actualArriveAt),
+          },
+        ]
+      : [];
+  const remainingQty = Math.max(track.orderedQty - track.arrivedQty, 1);
+
+  return (
+    <div className="purchase-edit-view">
+      <div className="purchase-edit-topline">
+        <button className="purchase-back-button" onClick={onBack} type="button">
+          ← 返回采购列表
+        </button>
+        <div className="purchase-breadcrumb">
+          <span>角色工作台</span>
+          <span>/</span>
+          <span>子物料采购台账</span>
+          <span>/</span>
+          <strong>{track.materialName}</strong>
+        </div>
+      </div>
+
+      <form
+        className="purchase-edit-card"
+        id="purchase-edit-form"
+        onSubmit={onSave}
+      >
         <div>
-          <h2>子物料采购台账</h2>
-          <p className="muted">
-            一行一条采购跟进，先维护链路状态；到货后单独确认到货数量。
+          <h2>编辑采购进度：{track.materialName}</h2>
+          <p>
+            {track.materialCode} · {track.purchaserName} · {track.productName}
           </p>
         </div>
-        <div className="toolbar-actions">
-          <span className="metric-pill">待跟进 {pendingTodos.length}</span>
-          <span className="metric-pill">
-            已到货 {data.procurementTracks.length - pendingTodos.length}
-          </span>
-          <button
-            className="action-button table-action"
-            onClick={() => setShowCreateTrack((current) => !current)}
-            type="button"
-          >
-            {showCreateTrack ? '收起新增' : '新增跟进'}
-          </button>
-        </div>
-      </div>
 
-      <div className="table-filter-row">
-        {[
-          ['TODO', '待跟进'],
-          ['READY_TO_SHIP', '待发货'],
-          ['SHIPPED', '在途'],
-          ['ARRIVED', '已到货'],
-          ['ALL', '全部'],
-        ].map(([value, label]) => (
-          <button
-            className={filter === value ? 'active' : ''}
-            key={value}
-            onClick={() => setFilter(value as typeof filter)}
-            type="button"
-          >
-            {label}
-          </button>
-        ))}
-      </div>
-
-      {showCreateTrack ? (
-        <form className="inline-create-form" onSubmit={handleCreateTrack}>
-          <label className="field">
-            <span>单品</span>
+        <div className="purchase-edit-grid">
+          <PurchaseField label="供应商">
+            <input disabled value={track.purchaserName} />
+          </PurchaseField>
+          <PurchaseField label="采购单号">
+            <input disabled value={track.receiptBatchNo ?? `PO-${track.materialCode}`} />
+          </PurchaseField>
+          <PurchaseField label="下单状态" hint="已有入库记录,按累计入库数量自动判断">
             <select
-              value={trackForm.productId}
+              value={editForm.orderStatus}
               onChange={(event) =>
-                setTrackForm((current) => ({ ...current, productId: event.target.value }))
+                onEditChange((current) => ({ ...current, orderStatus: event.target.value }))
               }
             >
-              {data.products.map((product) => (
-                <option key={product.id} value={product.id}>
-                  {product.code} · {product.name}
-                </option>
-              ))}
+              <option value="NOT_ORDERED">待下单</option>
+              <option value="ORDERED">已下单</option>
+              <option value="PARTIAL">部分到货</option>
+              <option value="COMPLETED">已完成</option>
             </select>
-          </label>
-          <label className="field">
-            <span>子物料</span>
+          </PurchaseField>
+          <PurchaseField label="生产状态" hint="累计入库达到下单数量后可切换为已到货">
             <select
-              value={trackForm.materialId}
+              value={editForm.productionStatus}
               onChange={(event) =>
-                setTrackForm((current) => ({ ...current, materialId: event.target.value }))
-              }
-            >
-              {data.materials.map((material) => (
-                <option key={material.id} value={material.id}>
-                  {material.code} · {material.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="field">
-            <span>需求数量</span>
-            <input
-              min={1}
-              type="number"
-              value={trackForm.requiredQty}
-              onChange={(event) =>
-                setTrackForm((current) => ({
+                onEditChange((current) => ({
                   ...current,
-                  requiredQty: Number(event.target.value),
+                  productionStatus: event.target.value,
                 }))
               }
-            />
-          </label>
-          <label className="field">
-            <span>下单数量</span>
+            >
+              <option value="NOT_STARTED">未生产</option>
+              <option value="IN_PRODUCTION">生产中</option>
+              <option value="READY_TO_SHIP">待发货</option>
+              <option value="SHIPPED">已发货</option>
+              <option value="ARRIVED">已到货</option>
+            </select>
+          </PurchaseField>
+
+          <PurchaseField label="已下单数量">
             <input
               min={0}
               type="number"
-              value={trackForm.orderedQty}
+              value={editForm.orderedQty}
               onChange={(event) =>
-                setTrackForm((current) => ({
+                onEditChange((current) => ({
                   ...current,
                   orderedQty: Number(event.target.value),
                 }))
               }
             />
-          </label>
-          <label className="field">
-            <span>预计发货</span>
+          </PurchaseField>
+          <PurchaseField label="下单时间">
+            <input disabled value={formatDate(track.expectedShipAt)} />
+          </PurchaseField>
+          <PurchaseField label="预计发货">
             <input
               type="datetime-local"
-              value={trackForm.expectedShipAt}
+              value={editForm.expectedShipAt}
               onChange={(event) =>
-                setTrackForm((current) => ({
+                onEditChange((current) => ({
                   ...current,
                   expectedShipAt: event.target.value,
                 }))
               }
             />
-          </label>
-          <label className="field">
-            <span>预计到货</span>
+          </PurchaseField>
+          <PurchaseField label="在途时间">
             <input
               type="datetime-local"
-              value={trackForm.expectedArriveAt}
+              value={editForm.inTransitAt}
               onChange={(event) =>
-                setTrackForm((current) => ({
+                onEditChange((current) => ({ ...current, inTransitAt: event.target.value }))
+              }
+            />
+          </PurchaseField>
+
+          <PurchaseField label="在途天数">
+            <input disabled value={track.inTransitAt && track.expectedArriveAt ? '2' : '待确认'} />
+          </PurchaseField>
+          <PurchaseField label="预计到货">
+            <input
+              type="datetime-local"
+              value={editForm.expectedArriveAt}
+              onChange={(event) =>
+                onEditChange((current) => ({
                   ...current,
                   expectedArriveAt: event.target.value,
                 }))
               }
             />
-          </label>
-          <label className="field field-full">
-            <span>待办提醒</span>
+          </PurchaseField>
+          <PurchaseField label="下次跟进">
             <input
-              value={trackForm.todoNote}
+              type="datetime-local"
+              value={editForm.nextFollowUpAt}
               onChange={(event) =>
-                setTrackForm((current) => ({ ...current, todoNote: event.target.value }))
+                onEditChange((current) => ({
+                  ...current,
+                  nextFollowUpAt: event.target.value,
+                }))
               }
             />
-          </label>
-          <div className="field-full button-row">
-            <button className="action-button" disabled={isPending} type="submit">
-              新增跟进
-            </button>
+          </PurchaseField>
+          <div />
+        </div>
+
+        <PurchaseField label="异常备注说明">
+          <textarea
+            rows={3}
+            value={editForm.note}
+            onChange={(event) =>
+              onEditChange((current) => ({ ...current, note: event.target.value }))
+            }
+          />
+        </PurchaseField>
+        <PurchaseField label="待办提醒">
+          <textarea
+            rows={3}
+            value={editForm.todoNote}
+            onChange={(event) =>
+              onEditChange((current) => ({ ...current, todoNote: event.target.value }))
+            }
+          />
+        </PurchaseField>
+      </form>
+
+      <section className="purchase-edit-card">
+        <div className="purchase-inbound-head">
+          <div>
+            <h2>分批到货入库信息</h2>
+            <p>基于当前采购跟进记录汇总,按入库数量自动判断下单状态和入库进度。</p>
+          </div>
+          <div>
+            <span>累计入库 {track.arrivedQty} pcs</span>
             <button
-              className="secondary-button"
-              onClick={() => setShowCreateTrack(false)}
+              onClick={() =>
+                onArrivalChange((current) => ({ ...current, arrivedQty: remainingQty }))
+              }
               type="button"
             >
-              取消
+              全部入库
+            </button>
+            <button disabled={isPending} form="purchase-arrival-form" type="submit">
+              到货入库
             </button>
           </div>
-        </form>
-      ) : null}
+        </div>
 
-      <table className="product-table batch-table procurement-table">
-        <thead>
-          <tr>
-            <th>单品 / 子物料</th>
-            <th>数量</th>
-            <th>下单</th>
-            <th>生产</th>
-            <th>预计发货</th>
-            <th>在途</th>
-            <th>预计到货</th>
-            <th>下次跟进</th>
-            <th>操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {filteredTracks.length ? (
-            filteredTracks.map((track) => (
-              <Fragment key={track.id}>
-                <tr
-                  className={
-                    editTrackId === track.id || arrivalTrackId === track.id
-                      ? 'selected-table-row'
-                      : ''
-                  }
-                >
-                  <td>
-                    <div className="material-title-line">
-                      <strong>{track.materialName}</strong>
-                      {isTrackSharedMaterial(data, track) ? (
-                        <span className="mini-tag">共用料</span>
-                      ) : null}
-                    </div>
-                    <div className="muted">
-                      {track.materialCode} · {track.productName}
-                    </div>
-                    {track.todoNote ? <div className="row-note">{track.todoNote}</div> : null}
-                  </td>
-                  <td>
-                    需求 {track.requiredQty}
-                    <div className="muted">
-                      下单 {track.orderedQty} · 到货 {track.arrivedQty}
-                    </div>
-                  </td>
-                  <td>{orderStatusLabels[track.orderStatus]}</td>
-                  <td>
-                    <span
-                      className={`status-chip ${procurementStatusClass(
-                        track.productionStatus,
-                      )}`}
-                    >
-                      {productionStatusLabels[track.productionStatus]}
-                    </span>
-                  </td>
-                  <td>{formatDate(track.expectedShipAt)}</td>
-                  <td>{formatDate(track.inTransitAt)}</td>
-                  <td>{formatDate(track.expectedArriveAt)}</td>
-                  <td>{formatDate(track.nextFollowUpAt)}</td>
-                  <td>
-                    <div className="row-actions">
-                      <button
-                        className="secondary-button table-action"
-                        onClick={() => {
-                          setArrivalTrackId(null);
-                          openEdit(track);
-                        }}
-                        type="button"
-                      >
-                        编辑
-                      </button>
-                      <button
-                        className="secondary-button table-action"
-                        onClick={() => {
-                          setEditTrackId(null);
-                          setArrivalTrackId(track.id);
-                          setArrivalForm((current) => ({
-                            ...current,
-                            receiptBatchNo:
-                              track.receiptBatchNo ?? `RB-${track.materialCode}-${Date.now()}`,
-                            arrivedQty: Math.max(track.requiredQty - track.arrivedQty, 1),
-                          }));
-                        }}
-                        type="button"
-                      >
-                        到货
-                      </button>
-                    </div>
+        <div className="purchase-inbound-table-wrap">
+          <table className="purchase-inbound-table">
+            <thead>
+              <tr>
+                <th>入库时间</th>
+                <th>入库单号</th>
+                <th>入库数量</th>
+                <th>来源</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody>
+              {inboundRows.length ? (
+                inboundRows.map((row) => (
+                  <tr key={row.code}>
+                    <td>{row.time}</td>
+                    <td>{row.code}</td>
+                    <td>{row.qty}</td>
+                    <td>{row.source}</td>
+                    <td>{row.note}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="purchase-empty" colSpan={5}>
+                    暂无入库记录。
                   </td>
                 </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
 
-                {editTrackId === track.id ? (
-                  <tr className="expanded-table-row">
-                    <td colSpan={9}>
-                      <form className="batch-edit-panel" onSubmit={handleUpdateTrack}>
-                        <h3>编辑采购进度：{track.materialName}</h3>
-                        <div className="inline-edit-grid">
-                          <label className="field">
-                            <span>下单状态</span>
-                            <select
-                              value={editForm.orderStatus}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  orderStatus: event.target.value,
-                                }))
-                              }
-                            >
-                              <option value="NOT_ORDERED">未下单</option>
-                              <option value="ORDERED">已下单</option>
-                              <option value="PARTIAL">部分到货</option>
-                              <option value="COMPLETED">已完成</option>
-                            </select>
-                          </label>
-                          <label className="field">
-                            <span>生产状态</span>
-                            <select
-                              value={editForm.productionStatus}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  productionStatus: event.target.value,
-                                }))
-                              }
-                            >
-                              <option value="NOT_STARTED">未生产</option>
-                              <option value="IN_PRODUCTION">生产中</option>
-                              <option value="READY_TO_SHIP">待发货</option>
-                              <option value="SHIPPED">已发货</option>
-                              <option value="ARRIVED">已到货</option>
-                            </select>
-                          </label>
-                          <label className="field">
-                            <span>已下单数量</span>
-                            <input
-                              min={0}
-                              type="number"
-                              value={editForm.orderedQty}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  orderedQty: Number(event.target.value),
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>预计发货</span>
-                            <input
-                              type="datetime-local"
-                              value={editForm.expectedShipAt}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  expectedShipAt: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>在途时间</span>
-                            <input
-                              type="datetime-local"
-                              value={editForm.inTransitAt}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  inTransitAt: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>预计到货</span>
-                            <input
-                              type="datetime-local"
-                              value={editForm.expectedArriveAt}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  expectedArriveAt: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>下次跟进</span>
-                            <input
-                              type="datetime-local"
-                              value={editForm.nextFollowUpAt}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  nextFollowUpAt: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field field-full">
-                            <span>待办提醒</span>
-                            <input
-                              value={editForm.todoNote}
-                              onChange={(event) =>
-                                setEditForm((current) => ({
-                                  ...current,
-                                  todoNote: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                        </div>
-                        <div className="button-row">
-                          <button className="action-button" disabled={isPending} type="submit">
-                            保存进度
-                          </button>
-                          <button
-                            className="secondary-button"
-                            onClick={() => setEditTrackId(null)}
-                            type="button"
-                          >
-                            取消
-                          </button>
-                        </div>
-                      </form>
-                    </td>
-                  </tr>
-                ) : null}
+        <form
+          className="purchase-arrival-form"
+          id="purchase-arrival-form"
+          onSubmit={onConfirmArrival}
+        >
+          <PurchaseField label="到货批次号">
+            <input
+              required
+              value={arrivalForm.receiptBatchNo}
+              onChange={(event) =>
+                onArrivalChange((current) => ({
+                  ...current,
+                  receiptBatchNo: event.target.value,
+                }))
+              }
+            />
+          </PurchaseField>
+          <PurchaseField label="到货数量">
+            <input
+              min={1}
+              type="number"
+              value={arrivalForm.arrivedQty}
+              onChange={(event) =>
+                onArrivalChange((current) => ({
+                  ...current,
+                  arrivedQty: Number(event.target.value),
+                }))
+              }
+            />
+          </PurchaseField>
+          <PurchaseField label="到货时间">
+            <input
+              type="datetime-local"
+              value={arrivalForm.arrivedAt}
+              onChange={(event) =>
+                onArrivalChange((current) => ({
+                  ...current,
+                  arrivedAt: event.target.value,
+                }))
+              }
+            />
+          </PurchaseField>
+          <PurchaseField label="备注">
+            <input
+              value={arrivalForm.note}
+              onChange={(event) =>
+                onArrivalChange((current) => ({ ...current, note: event.target.value }))
+              }
+            />
+          </PurchaseField>
+        </form>
+      </section>
 
-                {arrivalTrackId === track.id ? (
-                  <tr className="expanded-table-row">
-                    <td colSpan={9}>
-                      <form className="batch-edit-panel" onSubmit={handleConfirmArrival}>
-                        <h3>确认到货：{track.materialName}</h3>
-                        <div className="inline-edit-grid">
-                          <label className="field">
-                            <span>到货批次号</span>
-                            <input
-                              value={arrivalForm.receiptBatchNo}
-                              onChange={(event) =>
-                                setArrivalForm((current) => ({
-                                  ...current,
-                                  receiptBatchNo: event.target.value,
-                                }))
-                              }
-                              required
-                            />
-                          </label>
-                          <label className="field">
-                            <span>到货数量</span>
-                            <input
-                              min={1}
-                              type="number"
-                              value={arrivalForm.arrivedQty}
-                              onChange={(event) =>
-                                setArrivalForm((current) => ({
-                                  ...current,
-                                  arrivedQty: Number(event.target.value),
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field">
-                            <span>到货时间</span>
-                            <input
-                              type="datetime-local"
-                              value={arrivalForm.arrivedAt}
-                              onChange={(event) =>
-                                setArrivalForm((current) => ({
-                                  ...current,
-                                  arrivedAt: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                          <label className="field field-full">
-                            <span>备注</span>
-                            <input
-                              value={arrivalForm.note}
-                              onChange={(event) =>
-                                setArrivalForm((current) => ({
-                                  ...current,
-                                  note: event.target.value,
-                                }))
-                              }
-                            />
-                          </label>
-                        </div>
-                        <div className="button-row">
-                          <button className="action-button" disabled={isPending} type="submit">
-                            确认到货
-                          </button>
-                          <button
-                            className="secondary-button"
-                            onClick={() => setArrivalTrackId(null)}
-                            type="button"
-                          >
-                            取消
-                          </button>
-                        </div>
-                      </form>
-                    </td>
-                  </tr>
-                ) : null}
-              </Fragment>
-            ))
-          ) : (
-            <tr>
-              <td className="muted" colSpan={9}>
-                当前筛选下暂无采购跟进记录。
-              </td>
-            </tr>
-          )}
-        </tbody>
-      </table>
+      <div className="purchase-edit-actions">
+        <button onClick={onBack} type="button">
+          取消
+        </button>
+        <button disabled={isPending} form="purchase-edit-form" type="submit">
+          保存进度
+        </button>
+      </div>
     </div>
+  );
+}
+
+function PurchaseField({
+  children,
+  hint,
+  label,
+}: {
+  children: React.ReactNode;
+  hint?: string;
+  label: string;
+}) {
+  return (
+    <label className="purchase-field">
+      <span>{label}</span>
+      {children}
+      {hint ? <em>{hint}</em> : null}
+    </label>
   );
 }
 
@@ -1000,8 +1285,8 @@ function AdminWorkspace(props: WorkspaceProps) {
   const [activeTab, setActiveTab] = useState<'batches' | 'products'>('batches');
 
   return (
-    <div className="ops-module">
-      <div className="ops-module-tabs">
+    <div className="admin-workspace">
+      <div className="admin-tabs">
         <button
           className={activeTab === 'batches' ? 'active' : ''}
           onClick={() => setActiveTab('batches')}
@@ -1017,7 +1302,26 @@ function AdminWorkspace(props: WorkspaceProps) {
           单品管理
         </button>
       </div>
-      {activeTab === 'batches' ? <BatchWorkspace {...props} /> : <ProductWorkspace {...props} />}
+      <PageTransition k={activeTab}>
+        {activeTab === 'batches' ? <BatchWorkspace {...props} /> : <ProductWorkspace {...props} />}
+      </PageTransition>
+    </div>
+  );
+}
+
+function OpsStatCard({
+  label,
+  value,
+  tone = 'default',
+}: {
+  label: string;
+  value: string | number;
+  tone?: 'default' | 'warn' | 'danger' | 'ok';
+}) {
+  return (
+    <div className="ops-stat-card">
+      <span>{label}</span>
+      <strong className={`ops-stat-value ops-stat-${tone}`}>{value}</strong>
     </div>
   );
 }
@@ -1031,9 +1335,7 @@ function BatchWorkspace({
   startTransition,
   token,
 }: WorkspaceProps) {
-  const [expandedBatchId, setExpandedBatchId] = useState<string | null>(
-    data.pendingBatches[0]?.id ?? null,
-  );
+  const [selectedBatchId, setSelectedBatchId] = useState<string | null>(null);
   const [allocationByBatch, setAllocationByBatch] = useState<
     Record<string, { receiptBatchId: string; allocatedQty: number; note: string }>
   >({});
@@ -1048,6 +1350,8 @@ function BatchWorkspace({
       }
     >
   >({});
+  const [batchFilter, setBatchFilter] = useState<'pending' | 'done' | 'all'>('pending');
+  const [batchSearch, setBatchSearch] = useState('');
 
   function allocationDraft(
     batchId: string,
@@ -1159,18 +1463,114 @@ function BatchWorkspace({
     });
   }
 
+  const sharedGapTotal = data.pendingBatches.reduce(
+    (sum, batch) =>
+      sum +
+      batch.sharedRequirements
+        .filter((item) => item.isSharedMaterial)
+        .reduce((itemSum, item) => itemSum + item.remainingQty, 0),
+    0,
+  );
+  const actualFilledCount = data.pendingBatches.filter((batch) => batch.actual).length;
+  const visibleBatches = data.pendingBatches.filter((batch) => {
+    if (batchFilter === 'done' && batch.status !== 'COMPLETED') {
+      return false;
+    }
+    if (batchFilter === 'pending' && batch.status === 'COMPLETED') {
+      return false;
+    }
+    const query = batchSearch.trim().toLowerCase();
+    if (!query) {
+      return true;
+    }
+    return (
+      batch.batchNo.toLowerCase().includes(query) ||
+      batch.productName.toLowerCase().includes(query)
+    );
+  });
+  const selectedBatch = selectedBatchId
+    ? data.pendingBatches.find((batch) => batch.id === selectedBatchId)
+    : null;
+
+  if (selectedBatch) {
+    return (
+      <PageTransition k={`batch-${selectedBatch.id}`}>
+        <BatchEditView
+          actualDraft={actualDraft(selectedBatch)}
+          allocationDraft={allocationDraft}
+          batch={selectedBatch}
+          data={data}
+          isPending={isPending}
+          onActualChange={(actual) =>
+            setActualByBatch((current) => ({
+              ...current,
+              [selectedBatch.id]: actual,
+            }))
+          }
+          onAllocationChange={(draft) =>
+            setAllocationByBatch((current) => ({
+              ...current,
+              [selectedBatch.id]: draft,
+            }))
+          }
+          onBack={() => setSelectedBatchId(null)}
+          onSaveActual={() => saveActual(selectedBatch)}
+          onSaveAllocation={saveAllocation}
+          onStatusChange={(status) => changeStatus(selectedBatch.id, status)}
+        />
+      </PageTransition>
+    );
+  }
+
   return (
-    <div>
-      <section className="ops-data-section">
-        <div className="ops-table-toolbar">
-          <div>
+    <PageTransition k="batch-list">
+      <div className="admin-batch-workspace">
+      <div className="ops-stats-grid">
+        <OpsStatCard label="待处理批次" value={data.pendingBatches.length} tone="warn" />
+        <OpsStatCard label="异常 / 警报" value={0} />
+        <OpsStatCard label="共用料缺口" value={sharedGapTotal} tone="danger" />
+        <OpsStatCard label="实际结果已回填" value={actualFilledCount} />
+      </div>
+
+      <section className="ops-list-card">
+        <div className="ops-list-header">
+          <div className="ops-list-title">
             <h2>批次列表</h2>
-            <div className="muted">点击“编辑”展开单个批次处理共用料、状态和实际结果。</div>
+            <p>点击“编辑”进入批次详情页处理共用料、状态和实际结果。</p>
           </div>
-          <div className="field-hint">共 {data.pendingBatches.length} 个待处理批次</div>
+          <div className="ops-list-controls">
+            <div className="ops-filter-group">
+              {[
+                { id: 'pending' as const, label: '待处理' },
+                { id: 'done' as const, label: '已完成' },
+                { id: 'all' as const, label: '全部' },
+              ].map((item) => (
+                <button
+                  className={batchFilter === item.id ? 'active' : ''}
+                  key={item.id}
+                  onClick={() => setBatchFilter(item.id)}
+                  type="button"
+                >
+                  {item.label}
+                </button>
+              ))}
+            </div>
+            <label className="ops-search">
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="m21 21-4.3-4.3" />
+                <circle cx="11" cy="11" r="7" />
+              </svg>
+              <input
+                onChange={(event) => setBatchSearch(event.target.value)}
+                placeholder="批次号 / 单品"
+                value={batchSearch}
+              />
+            </label>
+          </div>
         </div>
 
-        <table className="product-table batch-table">
+        <div className="ops-table-scroll">
+        <table className="ops-admin-table batch-table">
           <thead>
             <tr>
               <th>批次</th>
@@ -1183,275 +1583,330 @@ function BatchWorkspace({
             </tr>
           </thead>
           <tbody>
-            {data.pendingBatches.map((batch) => {
-              const actual = actualDraft(batch);
+            {visibleBatches.map((batch) => {
               const sharedGap = batch.sharedRequirements
                 .filter((item) => item.isSharedMaterial)
                 .reduce((sum, item) => sum + item.remainingQty, 0);
-              const isExpanded = expandedBatchId === batch.id;
 
               return (
-                <Fragment key={batch.id}>
-                  <tr
-                    className={isExpanded ? 'selected-table-row' : undefined}
-                  >
+                <tr key={batch.id}>
                     <td>
                       <strong>{batch.batchNo}</strong>
-                      <div className="muted">{batch.productName}</div>
+                      <div>{batch.productName}</div>
                     </td>
                     <td>
-                      <span className="status-chip status-schedulable">{batch.status}</span>
+                      <span className="ops-dot-status">
+                        <span />
+                        {batch.status}
+                      </span>
                     </td>
                     <td>{batch.plannedQty}</td>
                     <td>{formatDate(batch.predictedLaunchDate)}</td>
-                    <td>{sharedGap}</td>
-                    <td className="muted">{batch.blockingReason ?? '无'}</td>
+                    <td className="ops-danger-text">{sharedGap}</td>
+                    <td>
+                      <div className="ops-reason-title">待齐套</div>
+                      <div className="ops-reason-sub">{batch.blockingReason ?? '可上架'}</div>
+                    </td>
                     <td>
                       <button
-                        className="secondary-button table-action"
-                        onClick={() => setExpandedBatchId(isExpanded ? null : batch.id)}
+                        className="ops-table-link"
+                        onClick={() => setSelectedBatchId(batch.id)}
                         type="button"
                       >
-                        {isExpanded ? '收起' : '编辑'}
+                        编辑
                       </button>
                     </td>
-                  </tr>
-                  {isExpanded ? (
-                    <tr className="expanded-table-row" key={`${batch.id}-edit`}>
-                      <td colSpan={7}>
-                        <div className="batch-edit-panel">
-                          <section>
-                            <h3>子物料与共用料分配</h3>
-                            <div className="list">
-                              {batch.sharedRequirements.map((item) => {
-                                const draft = allocationDraft(
-                                  batch.id,
-                                  item.materialId,
-                                  item.remainingQty,
-                                );
-                                const receipts = data.sharedReceiptBatches.filter(
-                                  (receipt) => receipt.materialId === item.materialId,
-                                );
-                                const selectedReceipt = receipts.find(
-                                  (receipt) => receipt.id === draft.receiptBatchId,
-                                );
-                                const maxAllocQty = Math.min(
-                                  item.remainingQty,
-                                  selectedReceipt?.remainingQty ?? 0,
-                                );
-
-                                return (
-                                  <div
-                                    className="subtle-box batch-material-row"
-                                    key={item.materialId}
-                                  >
-                                    <div>
-                                      <strong>{item.materialName}</strong>
-                                      <div className="muted">
-                                        需求 {item.requiredQty}
-                                        {item.isSharedMaterial
-                                          ? ` · 已分 ${item.allocatedQty} · 缺口 ${item.remainingQty}`
-                                          : ' · 非共用料，由采购到货链接'}
-                                      </div>
-                                    </div>
-                                    {item.isSharedMaterial ? (
-                                      <div className="inline-form">
-                                        <select
-                                          value={draft.receiptBatchId}
-                                          onChange={(event) =>
-                                            setAllocationByBatch((current) => ({
-                                              ...current,
-                                              [batch.id]: {
-                                                ...draft,
-                                                receiptBatchId: event.target.value,
-                                                allocatedQty: Math.max(
-                                                  Math.min(
-                                                    item.remainingQty,
-                                                    receipts.find(
-                                                      (receipt) =>
-                                                        receipt.id === event.target.value,
-                                                    )?.remainingQty ?? 0,
-                                                  ),
-                                                  1,
-                                                ),
-                                              },
-                                            }))
-                                          }
-                                        >
-                                          <option value="">选择共用料批次</option>
-                                          {receipts.map((receipt) => (
-                                            <option key={receipt.id} value={receipt.id}>
-                                              {receipt.batchNo} · 余量 {receipt.remainingQty}
-                                            </option>
-                                          ))}
-                                        </select>
-                                        <input
-                                          min={1}
-                                          max={maxAllocQty || 1}
-                                          type="number"
-                                          value={draft.allocatedQty}
-                                          onChange={(event) =>
-                                            setAllocationByBatch((current) => ({
-                                              ...current,
-                                              [batch.id]: {
-                                                ...draft,
-                                                allocatedQty: Math.min(
-                                                  Number(event.target.value),
-                                                  maxAllocQty || Number(event.target.value),
-                                                ),
-                                              },
-                                            }))
-                                          }
-                                        />
-                                        <button
-                                          className="secondary-button"
-                                          disabled={
-                                            isPending ||
-                                            !draft.receiptBatchId ||
-                                            item.remainingQty <= 0 ||
-                                            maxAllocQty <= 0
-                                          }
-                                          onClick={() =>
-                                            saveAllocation(
-                                              batch.id,
-                                              item.materialId,
-                                              item.remainingQty,
-                                            )
-                                          }
-                                          type="button"
-                                        >
-                                          分配
-                                        </button>
-                                        <div className="field-hint inline-hint">
-                                          最多 {maxAllocQty}
-                                        </div>
-                                      </div>
-                                    ) : null}
-                                  </div>
-                                );
-                              })}
-                            </div>
-                          </section>
-
-                          <section>
-                            <h3>批次状态</h3>
-                            <div className="button-row">
-                              <button
-                                className="secondary-button"
-                                disabled={isPending}
-                                onClick={() => changeStatus(batch.id, 'PENDING')}
-                                type="button"
-                              >
-                                待生产
-                              </button>
-                              <button
-                                className="secondary-button"
-                                disabled={isPending}
-                                onClick={() => changeStatus(batch.id, 'PAUSED')}
-                                type="button"
-                              >
-                                暂缓
-                              </button>
-                              <button
-                                className="secondary-button"
-                                disabled={isPending}
-                                onClick={() => changeStatus(batch.id, 'COMPLETED')}
-                                type="button"
-                              >
-                                已完成
-                              </button>
-                            </div>
-                          </section>
-
-                          <section>
-                            <h3>实际结果回填</h3>
-                            <div className="form-grid">
-                              <label className="field">
-                                <span>实际开工</span>
-                                <input
-                                  type="datetime-local"
-                                  value={actual.actualStartAt}
-                                  onChange={(event) =>
-                                    setActualByBatch((current) => ({
-                                      ...current,
-                                      [batch.id]: {
-                                        ...actual,
-                                        actualStartAt: event.target.value,
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label className="field">
-                                <span>实际完成</span>
-                                <input
-                                  type="datetime-local"
-                                  value={actual.actualFinishAt}
-                                  onChange={(event) =>
-                                    setActualByBatch((current) => ({
-                                      ...current,
-                                      [batch.id]: {
-                                        ...actual,
-                                        actualFinishAt: event.target.value,
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label className="field">
-                                <span>实际上架</span>
-                                <input
-                                  type="datetime-local"
-                                  value={actual.actualLaunchAt}
-                                  onChange={(event) =>
-                                    setActualByBatch((current) => ({
-                                      ...current,
-                                      [batch.id]: {
-                                        ...actual,
-                                        actualLaunchAt: event.target.value,
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                              <label className="field">
-                                <span>实际上架数量</span>
-                                <input
-                                  min={0}
-                                  type="number"
-                                  value={actual.actualLaunchQty}
-                                  onChange={(event) =>
-                                    setActualByBatch((current) => ({
-                                      ...current,
-                                      [batch.id]: {
-                                        ...actual,
-                                        actualLaunchQty: event.target.value,
-                                      },
-                                    }))
-                                  }
-                                />
-                              </label>
-                            </div>
-                            <button
-                              className="action-button"
-                              disabled={isPending}
-                              onClick={() => saveActual(batch)}
-                              type="button"
-                            >
-                              保存实际结果
-                            </button>
-                          </section>
-                        </div>
-                      </td>
-                    </tr>
-                  ) : null}
-                </Fragment>
+                </tr>
               );
             })}
           </tbody>
         </table>
+        </div>
+        <div className="ops-list-footer">共 {visibleBatches.length} 条记录</div>
       </section>
 
+      </div>
+    </PageTransition>
+  );
+}
+
+type BatchRecord = OperationBootstrap['pendingBatches'][number];
+type BatchActualDraft = {
+  actualStartAt: string;
+  actualFinishAt: string;
+  actualLaunchAt: string;
+  actualLaunchQty: string;
+};
+type BatchAllocationDraft = {
+  receiptBatchId: string;
+  allocatedQty: number;
+  note: string;
+};
+
+function batchStatusText(status: BatchRecord['status']) {
+  if (status === 'COMPLETED') {
+    return '已完成';
+  }
+  if (status === 'PAUSED') {
+    return '暂缓';
+  }
+  return '待生产';
+}
+
+function BatchEditView({
+  actualDraft,
+  allocationDraft,
+  batch,
+  data,
+  isPending,
+  onActualChange,
+  onAllocationChange,
+  onBack,
+  onSaveActual,
+  onSaveAllocation,
+  onStatusChange,
+}: {
+  actualDraft: BatchActualDraft;
+  allocationDraft: (
+    batchId: string,
+    materialId: string,
+    remainingQty: number,
+  ) => BatchAllocationDraft;
+  batch: BatchRecord;
+  data: OperationBootstrap;
+  isPending: boolean;
+  onActualChange: (actual: BatchActualDraft) => void;
+  onAllocationChange: (draft: BatchAllocationDraft) => void;
+  onBack: () => void;
+  onSaveActual: () => void;
+  onSaveAllocation: (batchId: string, materialId: string, remainingQty: number) => void;
+  onStatusChange: (status: 'PENDING' | 'PAUSED' | 'COMPLETED') => void;
+}) {
+  const sharedGap = batch.sharedRequirements
+    .filter((item) => item.isSharedMaterial)
+    .reduce((sum, item) => sum + item.remainingQty, 0);
+  const statusOptions: Array<{ label: string; value: 'PENDING' | 'PAUSED' | 'COMPLETED' }> = [
+    { label: '待生产', value: 'PENDING' },
+    { label: '暂缓', value: 'PAUSED' },
+    { label: '已完成', value: 'COMPLETED' },
+  ];
+
+  return (
+    <div className="batch-detail-view">
+      <div className="batch-detail-topline">
+        <button className="batch-back-button" onClick={onBack} type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          返回批次列表
+        </button>
+        <div className="batch-detail-crumb">
+          角色工作台 / 批次工作台 / <span>{batch.batchNo}</span>
+        </div>
+      </div>
+
+      <section className="batch-detail-card batch-overview-card">
+        <div className="batch-overview-head">
+          <div>
+            <h2>{batch.batchNo}</h2>
+            <p>{batch.productName}</p>
+          </div>
+          <span className="ops-dot-status">
+            <span />
+            {batch.status}
+          </span>
+        </div>
+        <div className="batch-overview-grid">
+          {[
+            ['计划量', batch.plannedQty],
+            ['预计上架', formatDate(batch.predictedLaunchDate)],
+            ['共用料缺口', sharedGap],
+            ['关键原因', batch.blockingReason ?? '可上架'],
+            ['创建', '—'],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="batch-detail-card">
+        <h2 className="batch-section-title">子物料与共用料分配</h2>
+        <div className="batch-material-list">
+          {batch.sharedRequirements.map((item) => {
+            const draft = allocationDraft(batch.id, item.materialId, item.remainingQty);
+            const receipts = data.sharedReceiptBatches.filter(
+              (receipt) => receipt.materialId === item.materialId,
+            );
+            const selectedReceipt = receipts.find(
+              (receipt) => receipt.id === draft.receiptBatchId,
+            );
+            const maxAllocQty = Math.min(item.remainingQty, selectedReceipt?.remainingQty ?? 0);
+            const done = item.remainingQty <= 0;
+
+            return (
+              <div className="batch-material-card" key={item.materialId}>
+                <div className="batch-material-main">
+                  <div>
+                    <h3>{item.materialName}</h3>
+                    <p>
+                      需求 {item.requiredQty.toLocaleString()} · 已关联到货{' '}
+                      {item.allocatedQty.toLocaleString()}
+                    </p>
+                    <p>
+                      {item.isSharedMaterial ? '共用料' : '非共用料'} · 缺口{' '}
+                      {item.remainingQty.toLocaleString()}
+                    </p>
+                  </div>
+                  <span className={done ? 'batch-material-badge' : 'batch-material-badge warn'}>
+                    {done ? '已关联到货' : '待分配'}
+                  </span>
+                </div>
+
+                {item.isSharedMaterial && !done ? (
+                  <div className="batch-allocation-controls">
+                    <select
+                      value={draft.receiptBatchId}
+                      onChange={(event) => {
+                        const nextReceipt = receipts.find(
+                          (receipt) => receipt.id === event.target.value,
+                        );
+                        onAllocationChange({
+                          ...draft,
+                          receiptBatchId: event.target.value,
+                          allocatedQty: Math.max(
+                            Math.min(item.remainingQty, nextReceipt?.remainingQty ?? 0),
+                            1,
+                          ),
+                        });
+                      }}
+                    >
+                      <option value="">选择共用料批次</option>
+                      {receipts.map((receipt) => (
+                        <option key={receipt.id} value={receipt.id}>
+                          {receipt.batchNo} · 余量 {receipt.remainingQty}
+                        </option>
+                      ))}
+                    </select>
+                    <input
+                      min={1}
+                      max={maxAllocQty || 1}
+                      type="number"
+                      value={draft.allocatedQty}
+                      onChange={(event) =>
+                        onAllocationChange({
+                          ...draft,
+                          allocatedQty: Math.min(
+                            Number(event.target.value),
+                            maxAllocQty || Number(event.target.value),
+                          ),
+                        })
+                      }
+                    />
+                    <button
+                      className="ops-secondary-button"
+                      disabled={
+                        isPending || !draft.receiptBatchId || item.remainingQty <= 0 || maxAllocQty <= 0
+                      }
+                      onClick={() => onSaveAllocation(batch.id, item.materialId, item.remainingQty)}
+                      type="button"
+                    >
+                      分配
+                    </button>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
+        </div>
+      </section>
+
+      <section className="batch-detail-card batch-status-card">
+        <div>
+          <h2 className="batch-section-title">批次状态</h2>
+          <div className="batch-status-options">
+            {statusOptions.map((option) => (
+              <button
+                className={batchStatusText(batch.status) === option.label ? 'active' : ''}
+                disabled={isPending}
+                key={option.value}
+                onClick={() => onStatusChange(option.value)}
+                type="button"
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div>
+          <h2 className="batch-section-title">实际结果回填</h2>
+          <div className="batch-actual-grid">
+            <label>
+              <span>实际开工</span>
+              <input
+                type="datetime-local"
+                value={actualDraft.actualStartAt}
+                onChange={(event) =>
+                  onActualChange({ ...actualDraft, actualStartAt: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>实际完成</span>
+              <input
+                type="datetime-local"
+                value={actualDraft.actualFinishAt}
+                onChange={(event) =>
+                  onActualChange({ ...actualDraft, actualFinishAt: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>实际上架</span>
+              <input
+                type="datetime-local"
+                value={actualDraft.actualLaunchAt}
+                onChange={(event) =>
+                  onActualChange({ ...actualDraft, actualLaunchAt: event.target.value })
+                }
+              />
+            </label>
+            <label>
+              <span>实际上架数量</span>
+              <input
+                min={0}
+                type="number"
+                value={actualDraft.actualLaunchQty}
+                onChange={(event) =>
+                  onActualChange({ ...actualDraft, actualLaunchQty: event.target.value })
+                }
+              />
+            </label>
+          </div>
+        </div>
+
+        <div className="batch-detail-actions">
+          <button className="ops-secondary-button" onClick={onBack} type="button">
+            取消
+          </button>
+          <button
+            className="ops-primary-button"
+            disabled={isPending}
+            onClick={onSaveActual}
+            type="button"
+          >
+            <svg aria-hidden="true" viewBox="0 0 24 24">
+              <path d="M19 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h11l5 5v11a2 2 0 0 1-2 2Z" />
+              <path d="M17 21v-8H7v8" />
+              <path d="M7 3v5h8" />
+            </svg>
+            保存实际结果
+          </button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1466,9 +1921,12 @@ function ProductWorkspace({
   token,
 }: WorkspaceProps) {
   const [selectedProductId, setSelectedProductId] = useState(data.products[0]?.id ?? '');
-  const [bomForm, setBomForm] = useState({
+  const [showProductModal, setShowProductModal] = useState(false);
+  const [showSubMaterialModal, setShowSubMaterialModal] = useState(false);
+  const [showBomModal, setShowBomModal] = useState(false);
+  const [bomForm, setBomForm] = useState<BomFormDraft>({
     productId: data.products[0]?.id ?? '',
-    versionNo: '',
+    versionNo: 'BOM-V2',
     effectiveFrom: new Date().toISOString().slice(0, 16),
     remark: '',
     activate: true,
@@ -1481,23 +1939,16 @@ function ProductWorkspace({
     ],
   });
   const selectedBom = data.activeBoms.find((bom) => bom.productId === selectedProductId);
+  const selectedProduct = data.products.find((product) => product.id === selectedProductId);
 
-  function updateBomItem(
-    index: number,
-    patch: Partial<{ materialId: string; unitUsage: number; isSharedMaterial: boolean }>,
-  ) {
-    setBomForm((current) => ({
-      ...current,
-      items: current.items.map((item, itemIndex) =>
-        itemIndex === index ? { ...item, ...patch } : item,
-      ),
-    }));
-  }
-
-  function handleBomSubmit(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
+  function saveBomVersion() {
     onMessage(null);
     onError(null);
+
+    if (!selectedProductId || !bomForm.versionNo.trim()) {
+      onError('请输入 BOM 版本号');
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -1517,9 +1968,10 @@ function ProductWorkspace({
         onMessage('BOM 版本已保存');
         setBomForm((current) => ({
           ...current,
-          versionNo: '',
+          versionNo: 'BOM-V2',
           remark: '',
         }));
+        setShowBomModal(false);
       } catch (submissionError) {
         onError(submissionError instanceof Error ? submissionError.message : 'BOM 保存失败');
       }
@@ -1527,169 +1979,540 @@ function ProductWorkspace({
   }
 
   return (
-    <div className="workspace-grid">
-      <section className="panel list-card">
-        <h2 className="section-title">单品列表</h2>
-        <div className="list">
-          {data.products.map((product) => (
+    <div className="admin-product-workspace">
+      <div className="admin-product-breadcrumb">
+        <span>角色工作台</span>
+        <span>›</span>
+        <strong>单品与 BOM</strong>
+      </div>
+
+      <div className="admin-product-header">
+        <div>
+          <h2>单品列表</h2>
+          <p>先维护单品和子料件,再点击单品创建 BOM 组合。</p>
+        </div>
+        <div className="admin-product-actions">
+          <button
+            className="ops-secondary-button"
+            onClick={() => setShowSubMaterialModal(true)}
+            type="button"
+          >
+            新增子料件
+          </button>
+          <button
+            className="ops-primary-button"
+            onClick={() => setShowProductModal(true)}
+            type="button"
+          >
+            新增单品
+          </button>
+        </div>
+      </div>
+
+      <div className="admin-product-grid">
+        <section className="admin-product-tree">
+          <h3>单品树</h3>
+          <div className="admin-product-list">
+            {data.products.map((product) => {
+              const active = selectedProductId === product.id;
+              return (
+                <button
+                  className={active ? 'active' : ''}
+                  key={product.id}
+                  onClick={() => {
+                    setSelectedProductId(product.id);
+                    setBomForm((current) => ({ ...current, productId: product.id }));
+                  }}
+                  type="button"
+                >
+                  <strong>{product.name}</strong>
+                  <span>{product.code}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          <div className="admin-material-summary">
+            <span>子料件</span>
+            <strong>已维护 {data.materials.length} 个子料件</strong>
+          </div>
+        </section>
+
+        <section className="admin-bom-card">
+          <div className="admin-bom-header">
+            <div>
+              <h3>{selectedProduct?.name ?? '未选择单品'}</h3>
+              <p>{selectedProduct?.code ?? '—'}</p>
+            </div>
             <button
-              className={`list-item selectable-row ${
-                selectedProductId === product.id ? 'selected-row' : ''
-              }`}
-              key={product.id}
+              className="ops-primary-button"
               onClick={() => {
-                setSelectedProductId(product.id);
-                setBomForm((current) => ({ ...current, productId: product.id }));
+                setBomForm((current) => ({ ...current, productId: selectedProductId }));
+                setShowBomModal(true);
               }}
               type="button"
             >
-              <strong>{product.name}</strong>
-              <div className="muted">{product.code}</div>
+              新增 BOM 版本
             </button>
-          ))}
-        </div>
-      </section>
+          </div>
 
-      <section className="stack">
-        <div className="panel list-card">
-          <h2 className="section-title">当前生效 BOM</h2>
-          {selectedBom ? (
-            <div className="list">
-              <strong>{selectedBom.versionNo}</strong>
-              <div className="muted">生效时间：{formatDate(selectedBom.effectiveFrom)}</div>
-              {selectedBom.items.map((item) => (
-                <div className="subtle-box" key={item.id}>
-                  {item.materialName} · 单耗 {item.unitUsage} ·{' '}
-                  {item.isSharedMaterial ? '共用料' : '非共用料'}
-                </div>
-              ))}
+          <div className="admin-bom-meta-grid">
+            <div className="highlight">
+              <span>当前 BOM</span>
+              <strong>{selectedBom?.versionNo ?? '—'}</strong>
             </div>
-          ) : (
-            <div className="muted">当前单品暂无生效 BOM</div>
-          )}
-        </div>
-
-        <div className="panel list-card">
-          <h2 className="section-title">新增 BOM 版本</h2>
-          <form className="form-grid" onSubmit={handleBomSubmit}>
-            <label className="field">
-              <span>BOM 版本号</span>
-              <input
-                value={bomForm.versionNo}
-                onChange={(event) =>
-                  setBomForm((current) => ({ ...current, versionNo: event.target.value }))
-                }
-                placeholder="BOM-V2"
-                required
-              />
-            </label>
-            <label className="field">
+            <div>
               <span>生效时间</span>
-              <input
-                type="datetime-local"
-                value={bomForm.effectiveFrom}
-                onChange={(event) =>
-                  setBomForm((current) => ({ ...current, effectiveFrom: event.target.value }))
-                }
-                required
-              />
-            </label>
-            <label className="field field-full">
-              <span>备注</span>
-              <textarea
-                rows={2}
-                value={bomForm.remark}
-                onChange={(event) =>
-                  setBomForm((current) => ({ ...current, remark: event.target.value }))
-                }
-              />
-            </label>
-            <div className="field-full list">
-              {bomForm.items.map((item, index) => (
-                <div className="subtle-box bom-item-row" key={`${index}-${item.materialId}`}>
-                  <label className="field">
-                    <span>子料</span>
-                    <select
-                      value={item.materialId}
-                      onChange={(event) =>
-                        updateBomItem(index, { materialId: event.target.value })
-                      }
-                    >
-                      {data.materials.map((material) => (
-                        <option key={material.id} value={material.id}>
-                          {material.code} · {material.name}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className="field">
-                    <span>单耗</span>
-                    <input
-                      min={1}
-                      type="number"
-                      value={item.unitUsage}
-                      onChange={(event) =>
-                        updateBomItem(index, { unitUsage: Number(event.target.value) })
-                      }
-                    />
-                  </label>
-                  <label className="field">
-                    <span>用料类型</span>
-                    <select
-                      value={item.isSharedMaterial ? 'shared' : 'dedicated'}
-                      onChange={(event) =>
-                        updateBomItem(index, {
-                          isSharedMaterial: event.target.value === 'shared',
-                        })
-                      }
-                    >
-                      <option value="dedicated">非共用料</option>
-                      <option value="shared">共用料</option>
-                    </select>
-                  </label>
-                  <button
-                    className="secondary-button"
-                    disabled={bomForm.items.length <= 1}
-                    onClick={() =>
-                      setBomForm((current) => ({
-                        ...current,
-                        items: current.items.filter((_, itemIndex) => itemIndex !== index),
-                      }))
-                    }
-                    type="button"
-                  >
-                    删除
-                  </button>
-                </div>
-              ))}
+              <strong>{selectedBom ? formatDate(selectedBom.effectiveFrom) : '—'}</strong>
             </div>
-            <div className="button-row field-full">
-              <button
-                className="secondary-button"
-                onClick={() =>
-                  setBomForm((current) => ({
-                    ...current,
-                    items: [
-                      ...current.items,
-                      {
-                        materialId: data.materials[0]?.id ?? '',
-                        unitUsage: 1,
-                        isSharedMaterial: false,
-                      },
-                    ],
-                  }))
-                }
-                type="button"
-              >
-                新增子料
-              </button>
-              <button className="action-button" disabled={isPending} type="submit">
-                保存 BOM
-              </button>
+            <div>
+              <span>子料数量</span>
+              <strong className="count">{selectedBom?.items.length ?? 0}</strong>
             </div>
-          </form>
-        </div>
-      </section>
+          </div>
+
+          <div className="admin-bom-table-wrap">
+            <table className="admin-bom-table">
+              <thead>
+                <tr>
+                  <th>子料编码</th>
+                  <th>子料名称</th>
+                  <th>规格</th>
+                  <th>单耗</th>
+                  <th>用料类型</th>
+                </tr>
+              </thead>
+              <tbody>
+                {selectedBom?.items.length ? (
+                  selectedBom.items.map((item) => (
+                    <tr key={item.id}>
+                      <td>{item.materialCode}</td>
+                      <td>{item.materialName}</td>
+                      <td className="muted">{data.materials.find((material) => material.id === item.materialId)?.unit ?? '—'}</td>
+                      <td>{item.unitUsage}</td>
+                      <td>
+                        <span className={item.isSharedMaterial ? 'bom-type shared' : 'bom-type'}>
+                          {item.isSharedMaterial ? '共用料' : '非共用料'}
+                        </span>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td colSpan={5}>尚未配置 BOM</td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      </div>
+
+      <AddProductModal
+        open={showProductModal}
+        onClose={() => setShowProductModal(false)}
+        onSubmit={() => onMessage('新增单品表单已确认，后端创建接口待接入')}
+      />
+      <AddSubMaterialModal
+        open={showSubMaterialModal}
+        onClose={() => setShowSubMaterialModal(false)}
+        onSubmit={() => onMessage('新增子料件表单已确认，后端创建接口待接入')}
+      />
+      <AddBomModal
+        bomForm={bomForm}
+        isPending={isPending}
+        materials={data.materials}
+        onClose={() => setShowBomModal(false)}
+        onSave={saveBomVersion}
+        open={showBomModal}
+        setBomForm={setBomForm}
+      />
     </div>
+  );
+}
+
+type BomFormDraft = {
+  productId: string;
+  versionNo: string;
+  effectiveFrom: string;
+  remark: string;
+  activate: boolean;
+  items: Array<{
+    materialId: string;
+    unitUsage: number;
+    isSharedMaterial: boolean;
+  }>;
+};
+
+function AddProductModal({
+  onClose,
+  onSubmit,
+  open,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    code: '',
+    name: '',
+    spec: '',
+    unit: '件',
+    minQty: 1,
+    stdDays: 5,
+    bufferDays: 2,
+    windowDays: 7,
+  });
+
+  function submit() {
+    if (!draft.code || !draft.name) {
+      return;
+    }
+    onSubmit();
+    onClose();
+  }
+
+  return (
+    <Modal
+      footer={
+        <>
+          <button className="ops-secondary-button" onClick={onClose} type="button">
+            取消
+          </button>
+          <button className="ops-primary-button" onClick={submit} type="button">
+            保存单品
+          </button>
+        </>
+      }
+      onClose={onClose}
+      open={open}
+      title="新增单品"
+      width={640}
+    >
+      <div className="app-modal-grid">
+        <FormField label="单品编码" required>
+          <input
+            className={inputCls}
+            value={draft.code}
+            onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="单品名称" required>
+          <input
+            className={inputCls}
+            value={draft.name}
+            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="规格(净含量)">
+          <input
+            className={inputCls}
+            value={draft.spec}
+            onChange={(event) => setDraft((current) => ({ ...current, spec: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="单位">
+          <input
+            className={inputCls}
+            value={draft.unit}
+            onChange={(event) => setDraft((current) => ({ ...current, unit: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="最低开工量">
+          <input
+            className={inputCls}
+            min={1}
+            type="number"
+            value={draft.minQty}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, minQty: Number(event.target.value) }))
+            }
+          />
+        </FormField>
+        <FormField label="标准生产天数">
+          <input
+            className={inputCls}
+            min={1}
+            type="number"
+            value={draft.stdDays}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, stdDays: Number(event.target.value) }))
+            }
+          />
+        </FormField>
+        <FormField label="缓冲天数">
+          <input
+            className={inputCls}
+            min={0}
+            type="number"
+            value={draft.bufferDays}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, bufferDays: Number(event.target.value) }))
+            }
+          />
+        </FormField>
+        <FormField label="短期窗口天数">
+          <input
+            className={inputCls}
+            min={1}
+            type="number"
+            value={draft.windowDays}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, windowDays: Number(event.target.value) }))
+            }
+          />
+        </FormField>
+      </div>
+    </Modal>
+  );
+}
+
+function AddSubMaterialModal({
+  onClose,
+  onSubmit,
+  open,
+}: {
+  open: boolean;
+  onClose: () => void;
+  onSubmit: () => void;
+}) {
+  const [draft, setDraft] = useState({
+    code: '',
+    name: '',
+    spec: '',
+    unit: 'pcs',
+  });
+
+  function submit() {
+    if (!draft.code || !draft.name) {
+      return;
+    }
+    onSubmit();
+    setDraft({ code: '', name: '', spec: '', unit: 'pcs' });
+    onClose();
+  }
+
+  return (
+    <Modal
+      footer={
+        <>
+          <button className="ops-secondary-button" onClick={onClose} type="button">
+            取消
+          </button>
+          <button className="ops-primary-button" onClick={submit} type="button">
+            保存子件
+          </button>
+        </>
+      }
+      onClose={onClose}
+      open={open}
+      title="新增子件"
+      width={600}
+    >
+      <div className="app-modal-grid">
+        <FormField label="子料编码" required>
+          <input
+            className={inputCls}
+            value={draft.code}
+            onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="子料名称" required>
+          <input
+            className={inputCls}
+            value={draft.name}
+            onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="规格">
+          <input
+            className={inputCls}
+            value={draft.spec}
+            onChange={(event) => setDraft((current) => ({ ...current, spec: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="单位">
+          <input
+            className={inputCls}
+            value={draft.unit}
+            onChange={(event) => setDraft((current) => ({ ...current, unit: event.target.value }))}
+          />
+        </FormField>
+      </div>
+    </Modal>
+  );
+}
+
+function AddBomModal({
+  bomForm,
+  isPending,
+  materials,
+  onClose,
+  onSave,
+  open,
+  setBomForm,
+}: {
+  bomForm: BomFormDraft;
+  isPending: boolean;
+  materials: OperationBootstrap['materials'];
+  onClose: () => void;
+  onSave: () => void;
+  open: boolean;
+  setBomForm: (updater: (current: BomFormDraft) => BomFormDraft) => void;
+}) {
+  function updateBomItem(
+    index: number,
+    patch: Partial<{ materialId: string; unitUsage: number; isSharedMaterial: boolean }>,
+  ) {
+    setBomForm((current) => ({
+      ...current,
+      items: current.items.map((item, itemIndex) =>
+        itemIndex === index ? { ...item, ...patch } : item,
+      ),
+    }));
+  }
+
+  return (
+    <Modal
+      footer={
+        <>
+          <button
+            className="ops-secondary-button app-modal-footer-left"
+            onClick={() =>
+              setBomForm((current) => ({
+                ...current,
+                items: [
+                  ...current.items,
+                  {
+                    materialId: materials[0]?.id ?? '',
+                    unitUsage: 1,
+                    isSharedMaterial: false,
+                  },
+                ],
+              }))
+            }
+            type="button"
+          >
+            新增子料
+          </button>
+          <button className="ops-secondary-button" onClick={onClose} type="button">
+            取消
+          </button>
+          <button className="ops-primary-button" disabled={isPending} onClick={onSave} type="button">
+            保存 BOM
+          </button>
+        </>
+      }
+      onClose={onClose}
+      open={open}
+      title="新增 BOM 版本"
+      width={720}
+    >
+      <div className="app-modal-grid">
+        <FormField label="BOM 版本号" required>
+          <input
+            className={inputCls}
+            value={bomForm.versionNo}
+            onChange={(event) =>
+              setBomForm((current) => ({ ...current, versionNo: event.target.value }))
+            }
+          />
+        </FormField>
+        <FormField label="生效时间" required>
+          <input
+            className={inputCls}
+            type="datetime-local"
+            value={bomForm.effectiveFrom}
+            onChange={(event) =>
+              setBomForm((current) => ({ ...current, effectiveFrom: event.target.value }))
+            }
+          />
+        </FormField>
+      </div>
+
+      <label className="app-modal-checkbox">
+        <input
+          checked={bomForm.activate}
+          onChange={(event) =>
+            setBomForm((current) => ({ ...current, activate: event.target.checked }))
+          }
+          type="checkbox"
+        />
+        BOM 立即生效
+      </label>
+
+      <FormField label="备注">
+        <textarea
+          className="app-modal-textarea"
+          rows={3}
+          value={bomForm.remark}
+          onChange={(event) =>
+            setBomForm((current) => ({ ...current, remark: event.target.value }))
+          }
+        />
+      </FormField>
+
+      <div className="app-bom-editor">
+        <div className="app-bom-editor-head">
+          <span>子料</span>
+          <span>单耗</span>
+          <span>用料类型</span>
+          <span />
+        </div>
+        {bomForm.items.map((item, index) => (
+          <div className="app-bom-editor-row" key={`${index}-${item.materialId}`}>
+            <select
+              className={selectCls}
+              value={item.materialId}
+              onChange={(event) => updateBomItem(index, { materialId: event.target.value })}
+            >
+              {materials.map((material) => (
+                <option key={material.id} value={material.id}>
+                  {material.code}・{material.name}・{material.unit}
+                </option>
+              ))}
+            </select>
+            <input
+              className={inputCls}
+              min={1}
+              type="number"
+              value={item.unitUsage}
+              onChange={(event) => updateBomItem(index, { unitUsage: Number(event.target.value) })}
+            />
+            <select
+              className={selectCls}
+              value={item.isSharedMaterial ? 'shared' : 'dedicated'}
+              onChange={(event) =>
+                updateBomItem(index, {
+                  isSharedMaterial: event.target.value === 'shared',
+                })
+              }
+            >
+              <option value="dedicated">非共用料</option>
+              <option value="shared">共用料</option>
+            </select>
+            <button
+              className="app-bom-delete-button"
+              disabled={bomForm.items.length <= 1}
+              onClick={() =>
+                setBomForm((current) => ({
+                  ...current,
+                  items: current.items.filter((_, itemIndex) => itemIndex !== index),
+                }))
+              }
+              type="button"
+            >
+              <svg aria-hidden="true" viewBox="0 0 24 24">
+                <path d="M3 6h18" />
+                <path d="M8 6V4h8v2" />
+                <path d="m19 6-1 14H6L5 6" />
+                <path d="M10 11v5" />
+                <path d="M14 11v5" />
+              </svg>
+            </button>
+          </div>
+        ))}
+      </div>
+    </Modal>
   );
 }

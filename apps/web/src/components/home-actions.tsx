@@ -39,29 +39,29 @@ export function HomeActions() {
   }
 
   if (loading) {
-    return <div className="role-panel">正在识别当前账号权限...</div>;
+    return <div className="home-account-panel">识别中...</div>;
   }
 
   if (user) {
     const canOperate = user.role === 'ADMIN' || user.role === 'PURCHASER';
 
     return (
-      <div className="role-panel">
-        <div>
-          <div className="field-hint">当前登录</div>
-          <strong>
-            {user.name} · {roleLabel(user.role)}
-          </strong>
-          <div className="field-hint">{user.username}</div>
-        </div>
+      <div className="home-account-panel">
+        <span className="home-role-badge">{roleLabel(user.role)}</span>
+        <span className="home-username">{displayUsername(user.username)}</span>
         {canOperate ? (
-          <Link href="/operations" className="action-button" style={{ display: 'inline-flex' }}>
+          <Link href="/operations" className="home-account-button">
             进入操作台
           </Link>
         ) : (
-          <div className="permission-note">仅可查看看板，无操作台权限</div>
+          null
         )}
-        <button className="secondary-button" onClick={logout} type="button">
+        <button className="home-logout-button" onClick={logout} type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="M10 6H6v12h4" />
+            <path d="M14 8l4 4-4 4" />
+            <path d="M8 12h10" />
+          </svg>
           退出
         </button>
       </div>
@@ -69,12 +69,9 @@ export function HomeActions() {
   }
 
   return (
-    <div className="role-panel">
-      <div>
-        <div className="field-hint">当前未登录</div>
-        <strong>运营看板可直接查看</strong>
-      </div>
-      <Link href="/login" className="secondary-button" style={{ display: 'inline-flex' }}>
+    <div className="home-account-panel">
+      <span className="home-username">未登录</span>
+      <Link href="/login" className="home-account-button">
         {hasToken ? '重新登录' : '操作人员登录'}
       </Link>
     </div>
@@ -87,8 +84,12 @@ function roleLabel(role: AuthUser['role']) {
   }
 
   if (role === 'PURCHASER') {
-    return '采购';
+    return '采购员';
   }
 
-  return '运营查看';
+  return '运营';
+}
+
+function displayUsername(username: string) {
+  return username === 'operator' ? 'ops' : username;
 }

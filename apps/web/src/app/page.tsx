@@ -20,86 +20,119 @@ export default async function HomePage() {
   const blockedCount = products.filter((item) => item.status === 'BLOCKED').length;
 
   return (
-    <main className="page-shell">
-      <section className="hero">
-        <div className="dashboard-header">
-          <span className="eyebrow">上架决策看板 V1</span>
+    <main className="home-page">
+      <header className="home-topbar">
+        <div className="home-topbar-inner">
+          <div className="home-brand">
+            <span className="home-brand-mark">备</span>
+            <span>直播间备货系统</span>
+            <span className="home-breadcrumb-separator">/</span>
+            <span className="home-breadcrumb-current">上架决策看板</span>
+          </div>
           <HomeActions />
         </div>
-        <h1 style={{ fontSize: '44px', lineHeight: 1.05, maxWidth: 820 }}>
-          直播间进度追踪器
-        </h1>
-        <p className="muted" style={{ fontSize: '16px', maxWidth: 720 }}>
-          按分批到料、共用料分配、BOM 当前生效版本与最低开工门槛，汇总单品当前可上架量、短期新增量和下一批预计时间。
-        </p>
-      </section>
+      </header>
 
-      <section className="stats-grid" style={{ marginBottom: 24 }}>
-        <div className="panel stat-card">
-          <div className="muted">单品总数</div>
-          <div className="stat-value">{products.length}</div>
-        </div>
-        <div className="panel stat-card">
-          <div className="muted">当前可上架</div>
-          <div className="stat-value">{launchableCount}</div>
-        </div>
-        <div className="panel stat-card">
-          <div className="muted">当前受阻</div>
-          <div className="stat-value">{blockedCount}</div>
-        </div>
-      </section>
+      <div className="home-content">
+        <h1 className="home-page-title">上架决策看板 V1</h1>
 
-      <section className="panel list-card">
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-end', marginBottom: 12, gap: 12 }}>
-          <div>
-            <h2 className="section-title">单品结果列表</h2>
-            <p className="muted" style={{ margin: 0 }}>
-              首页只展示运营决策需要的结果，不展开完整计算链路。
-            </p>
+        <section className="home-stats-grid">
+          <div className="home-stat-card">
+            <div className="home-stat-label">单品总数</div>
+            <div className="home-stat-value">{products.length}</div>
           </div>
-        </div>
+          <div className="home-stat-card">
+            <div className="home-stat-label">当前可上架</div>
+            <div className="home-stat-value home-stat-value-blue">{launchableCount}</div>
+          </div>
+          <div className="home-stat-card">
+            <div className="home-stat-label">当前受阻</div>
+            <div className="home-stat-value home-stat-value-red">{blockedCount}</div>
+          </div>
+        </section>
 
-        <table className="product-table">
-          <thead>
-            <tr>
-              <th>单品</th>
-              <th>当前已可上架</th>
-              <th>短期新增</th>
-              <th>下一批预计上架</th>
-              <th>状态</th>
-              <th>关键原因</th>
-              <th>操作</th>
-            </tr>
-          </thead>
-          <tbody>
+        <section className="home-table-card">
+          <div className="home-table-header">
+            <h2>单品结果列表</h2>
+            <p>首页只展示运营决策需要的结果,不展开完整计算链路。</p>
+          </div>
+
+          <div className="home-table-scroll">
+            <table className="home-product-table">
+              <thead>
+                <tr>
+                  <th>单品</th>
+                  <th>当前已可上架</th>
+                  <th>短期新增</th>
+                  <th>下一批预计上架</th>
+                  <th>状态</th>
+                  <th>关键原因</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {products.map((product) => (
+                  <tr key={product.id}>
+                    <td>
+                      <Link href={`/products/${product.id}`} className="home-product-link">
+                        <strong>{product.name}</strong>
+                        <span>{product.code}</span>
+                      </Link>
+                    </td>
+                    <td>{product.launchableQtyNow}</td>
+                    <td>{product.shortTermIncrementQty}</td>
+                    <td>{formatDate(product.nextLaunchDate)}</td>
+                    <td>
+                      <StatusChip state={product.status} variant="plain" />
+                    </td>
+                    <td className="home-table-muted">{product.reasonSummary}</td>
+                    <td>
+                      <Link href={`/products/${product.id}`} className="home-detail-link">
+                        查看详情
+                      </Link>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div className="home-mobile-list">
             {products.map((product) => (
-              <tr key={product.id}>
-                <td>
-                  <Link href={`/products/${product.id}`}>
+              <article className="home-mobile-item" key={product.id}>
+                <div className="home-mobile-title-row">
+                  <div className="home-mobile-product">
                     <strong>{product.name}</strong>
-                    <div className="muted">{product.code}</div>
-                  </Link>
-                </td>
-                <td>{product.launchableQtyNow}</td>
-                <td>{product.shortTermIncrementQty}</td>
-                <td>{formatDate(product.nextLaunchDate)}</td>
-                <td>
-                  <StatusChip state={product.status} />
-                </td>
-                <td className="muted">{product.reasonSummary}</td>
-                <td>
-                  <Link
-                    href={`/products/${product.id}`}
-                    className="secondary-button table-action"
-                  >
-                    查看详情
-                  </Link>
-                </td>
-              </tr>
+                    <span>{product.code}</span>
+                  </div>
+                  <StatusChip state={product.status} variant="plain" />
+                </div>
+                <div className="home-mobile-metrics">
+                  <div>
+                    <span>已可上架</span>
+                    <strong>{product.launchableQtyNow}</strong>
+                  </div>
+                  <div>
+                    <span>短期新增</span>
+                    <strong>{product.shortTermIncrementQty}</strong>
+                  </div>
+                  <div>
+                    <span>下一批</span>
+                    <strong>{formatDate(product.nextLaunchDate)}</strong>
+                  </div>
+                </div>
+                <p>原因：{product.reasonSummary}</p>
+                <Link href={`/products/${product.id}`} className="home-mobile-detail-link">
+                  查看详情
+                  <svg aria-hidden="true" viewBox="0 0 24 24">
+                    <path d="m9 18 6-6-6-6" />
+                  </svg>
+                </Link>
+              </article>
             ))}
-          </tbody>
-        </table>
-      </section>
+          </div>
+        </section>
+      </div>
     </main>
   );
 }

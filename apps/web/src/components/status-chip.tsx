@@ -6,9 +6,18 @@ const statusMap: Record<ProductState, { label: string; className: string }> = {
   BLOCKED: { label: '受阻', className: 'status-blocked' },
 };
 
-export function StatusChip({ state }: { state: ProductState }) {
+export function StatusChip({
+  state,
+  variant = 'pill',
+}: {
+  state: ProductState;
+  variant?: 'pill' | 'plain';
+}) {
   const config = statusMap[state];
 
-  return <span className={`status-chip ${config.className}`}>{config.label}</span>;
+  return (
+    <span className={`status-chip ${config.className} status-chip-${variant}`}>
+      {config.label}
+    </span>
+  );
 }
-
