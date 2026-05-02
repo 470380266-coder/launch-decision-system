@@ -2987,6 +2987,63 @@ textarea {
   margin-right: auto;
 }
 
+.app-button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  border: 0;
+  border-radius: 999px;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+  line-height: 1;
+  white-space: nowrap;
+  transition: background-color 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.app-button-md {
+  height: 32px;
+  padding: 0 16px;
+}
+
+.app-button-sm {
+  height: 28px;
+  padding: 0 12px;
+}
+
+.app-button-primary {
+  background: #171717;
+  color: #ffffff;
+}
+
+.app-button-primary:hover {
+  background: #000000;
+}
+
+.app-button-secondary {
+  background: #fafafa;
+  color: #171717;
+}
+
+.app-button-secondary:hover {
+  background: #ebebeb;
+}
+
+.app-button-ghost {
+  background: transparent;
+  color: #171717;
+}
+
+.app-button-ghost:hover {
+  background: #fafafa;
+}
+
+.app-button:disabled {
+  cursor: not-allowed;
+  opacity: 0.6;
+}
+
 .app-modal-grid {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

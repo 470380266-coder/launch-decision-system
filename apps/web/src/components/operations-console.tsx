@@ -16,6 +16,7 @@ import {
 import { AuthUser, OperationBootstrap } from '@/lib/types';
 import { PageTransition } from '@/components/page-transition';
 import { FormField, Modal, inputCls, selectCls } from '@/components/modal';
+import { AppButton } from '@/components/app-button';
 
 const TOKEN_KEY = 'launch-decision-token';
 
@@ -795,21 +796,20 @@ function ProcurementWorkspace({
         <Modal
           footer={
             <>
-              <button
-                className="modal-quiet-button"
+              <AppButton
                 onClick={() => setShowCreateTrack(false)}
                 type="button"
+                variant="secondary"
               >
                 取消
-              </button>
-              <button
-                className="modal-primary-button"
+              </AppButton>
+              <AppButton
                 disabled={isPending}
                 form="create-procurement-track"
                 type="submit"
               >
                 保存跟进
-              </button>
+              </AppButton>
             </>
           }
           onClose={() => setShowCreateTrack(false)}
@@ -2229,12 +2229,12 @@ function AddProductModal({
     <Modal
       footer={
         <>
-          <button className="ops-secondary-button" onClick={onClose} type="button">
+          <AppButton onClick={onClose} type="button" variant="secondary">
             取消
-          </button>
-          <button className="ops-primary-button" onClick={submit} type="button">
+          </AppButton>
+          <AppButton onClick={submit} type="button">
             保存单品
-          </button>
+          </AppButton>
         </>
       }
       onClose={onClose}
@@ -2349,12 +2349,12 @@ function AddSubMaterialModal({
     <Modal
       footer={
         <>
-          <button className="ops-secondary-button" onClick={onClose} type="button">
+          <AppButton onClick={onClose} type="button" variant="secondary">
             取消
-          </button>
-          <button className="ops-primary-button" onClick={submit} type="button">
+          </AppButton>
+          <AppButton onClick={submit} type="button">
             保存子件
-          </button>
+          </AppButton>
         </>
       }
       onClose={onClose}
@@ -2429,8 +2429,8 @@ function AddBomModal({
     <Modal
       footer={
         <>
-          <button
-            className="ops-secondary-button app-modal-footer-left"
+          <AppButton
+            className="app-modal-footer-left"
             onClick={() =>
               setBomForm((current) => ({
                 ...current,
@@ -2445,15 +2445,16 @@ function AddBomModal({
               }))
             }
             type="button"
+            variant="secondary"
           >
             新增子料
-          </button>
-          <button className="ops-secondary-button" onClick={onClose} type="button">
+          </AppButton>
+          <AppButton onClick={onClose} type="button" variant="secondary">
             取消
-          </button>
-          <button className="ops-primary-button" disabled={isPending} onClick={onSave} type="button">
+          </AppButton>
+          <AppButton disabled={isPending} onClick={onSave} type="button">
             保存 BOM
-          </button>
+          </AppButton>
         </>
       }
       onClose={onClose}
