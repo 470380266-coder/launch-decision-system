@@ -112,6 +112,8 @@ export type OperationBootstrap = {
     materialCode: string;
     materialName: string;
     purchaserName: string;
+    supplier: string | null;
+    purchaseOrderNo: string | null;
     requiredQty: number;
     orderedQty: number;
     arrivedQty: number;
@@ -122,13 +124,16 @@ export type OperationBootstrap = {
       | 'READY_TO_SHIP'
       | 'SHIPPED'
       | 'ARRIVED';
+    orderedAt: string | null;
     expectedShipAt: string | null;
     inTransitAt: string | null;
+    transitDays: number | null;
     expectedArriveAt: string | null;
     actualArriveAt: string | null;
     receiptBatchNo: string | null;
     todoNote: string | null;
     nextFollowUpAt: string | null;
+    exceptionNote: string | null;
     note: string | null;
     receiptBatchId: string | null;
   }>;
@@ -181,12 +186,17 @@ export type ReceiptPayload = {
 export type ProcurementTrackPayload = {
   productId: string;
   materialId: string;
+  supplier?: string;
+  purchaseOrderNo?: string;
   requiredQty: number;
   orderedQty: number;
+  orderedAt?: string;
   expectedShipAt?: string;
+  transitDays?: number;
   expectedArriveAt?: string;
   nextFollowUpAt?: string;
   todoNote?: string;
+  exceptionNote?: string;
   note?: string;
 };
 

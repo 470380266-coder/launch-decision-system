@@ -419,8 +419,11 @@ function ProcurementWorkspace({
   const [trackForm, setTrackForm] = useState({
     productId: data.products[0]?.id ?? '',
     materialId: data.materials[0]?.id ?? '',
+    supplier: '',
+    purchaseOrderNo: '',
     requiredQty: 1,
     orderedQty: 1,
+    orderedAt: '',
     expectedShipAt: '',
     expectedArriveAt: '',
     nextFollowUpAt: '',
@@ -485,8 +488,11 @@ function ProcurementWorkspace({
         await createProcurementTrack(
           {
             ...trackForm,
+            supplier: trackForm.supplier || undefined,
+            purchaseOrderNo: trackForm.purchaseOrderNo || undefined,
             requiredQty: Number(trackForm.requiredQty),
             orderedQty: Number(trackForm.orderedQty),
+            orderedAt: trackForm.orderedAt || undefined,
             expectedShipAt: trackForm.expectedShipAt || undefined,
             expectedArriveAt: trackForm.expectedArriveAt || undefined,
             nextFollowUpAt: trackForm.nextFollowUpAt || undefined,
@@ -500,8 +506,10 @@ function ProcurementWorkspace({
         setShowCreateTrack(false);
         setTrackForm((current) => ({
           ...current,
+          purchaseOrderNo: '',
           requiredQty: 1,
           orderedQty: 1,
+          orderedAt: '',
           todoNote: '',
           note: '',
         }));
@@ -594,6 +602,8 @@ function ProcurementWorkspace({
         track.productCode,
         track.materialName,
         track.materialCode,
+        track.supplier ?? '',
+        track.purchaseOrderNo ?? '',
         track.purchaserName,
         track.receiptBatchNo ?? '',
       ]
@@ -726,8 +736,12 @@ function ProcurementWorkspace({
                           <div>{track.materialCode}</div>
                         </td>
                         <td>
-                          <strong>{track.purchaserName}</strong>
-                          <div>{track.receiptBatchNo ?? `PO-${track.materialCode}`}</div>
+                          <strong>{track.supplier ?? track.purchaserName}</strong>
+                          <div>
+                            {track.purchaseOrderNo ??
+                              track.receiptBatchNo ??
+                              `PO-${track.materialCode}`}
+                          </div>
                         </td>
                         <td>{track.orderedQty || track.requiredQty} pcs</td>
                         <td>
@@ -743,7 +757,7 @@ function ProcurementWorkspace({
                             {statusLabel}
                           </span>
                         </td>
-                        <td>{formatDate(track.expectedShipAt)}</td>
+                        <td>{formatDate(track.orderedAt ?? track.expectedShipAt)}</td>
                         <td>{formatDate(track.expectedArriveAt)}</td>
                         <td>{shortDate(track.actualArriveAt)}</td>
                         <td
@@ -838,6 +852,29 @@ function ProcurementWorkspace({
                 ))}
               </select>
             </FormField>
+            <FormField label="供应商">
+              <input
+                className={inputCls}
+                placeholder="请输入供应商"
+                value={trackForm.supplier}
+                onChange={(event) =>
+                  setTrackForm((current) => ({ ...current, supplier: event.target.value }))
+                }
+              />
+            </FormField>
+            <FormField label="采购单">
+              <input
+                className={inputCls}
+                placeholder="请输入采购单号"
+                value={trackForm.purchaseOrderNo}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    purchaseOrderNo: event.target.value,
+                  }))
+                }
+              />
+            </FormField>
             <FormField label="需求数量">
               <input
                 className={inputCls}
@@ -862,6 +899,19 @@ function ProcurementWorkspace({
                   setTrackForm((current) => ({
                     ...current,
                     orderedQty: Number(event.target.value),
+                  }))
+                }
+              />
+            </FormField>
+            <FormField label="下单时间">
+              <input
+                className={inputCls}
+                type="datetime-local"
+                value={trackForm.orderedAt}
+                onChange={(event) =>
+                  setTrackForm((current) => ({
+                    ...current,
+                    orderedAt: event.target.value,
                   }))
                 }
               />
@@ -1013,16 +1063,19 @@ function PurchaseEditView({
         <div>
           <h2>编辑采购进度：{track.materialName}</h2>
           <p>
-            {track.materialCode} · {track.purchaserName} · {track.productName}
+            {track.materialCode} · {track.supplier ?? track.purchaserName} · {track.productName}
           </p>
         </div>
 
         <div className="purchase-edit-grid">
           <PurchaseField label="供应商">
-            <input disabled value={track.purchaserName} />
+            <input disabled value={track.supplier ?? track.purchaserName} />
           </PurchaseField>
           <PurchaseField label="采购单号">
-            <input disabled value={track.receiptBatchNo ?? `PO-${track.materialCode}`} />
+            <input
+              disabled
+              value={track.purchaseOrderNo ?? track.receiptBatchNo ?? `PO-${track.materialCode}`}
+            />
           </PurchaseField>
           <PurchaseField label="下单状态" hint="已有入库记录,按累计入库数量自动判断">
             <select
@@ -1069,7 +1122,7 @@ function PurchaseEditView({
             />
           </PurchaseField>
           <PurchaseField label="下单时间">
-            <input disabled value={formatDate(track.expectedShipAt)} />
+            <input disabled value={formatDate(track.orderedAt ?? track.expectedShipAt)} />
           </PurchaseField>
           <PurchaseField label="预计发货">
             <input
