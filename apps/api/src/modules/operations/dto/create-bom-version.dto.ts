@@ -4,7 +4,7 @@ import {
   IsArray,
   IsBoolean,
   IsDateString,
-  IsInt,
+  IsNumber,
   IsOptional,
   IsString,
   Min,
@@ -15,8 +15,9 @@ class CreateBomItemDto {
   @IsString()
   materialId!: string;
 
-  @IsInt()
-  @Min(1)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.000001)
   unitUsage!: number;
 
   @IsBoolean()

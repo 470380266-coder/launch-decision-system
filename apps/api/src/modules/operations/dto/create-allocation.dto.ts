@@ -1,4 +1,5 @@
-import { IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateAllocationDto {
   @IsString()
@@ -7,8 +8,9 @@ export class CreateAllocationDto {
   @IsString()
   productionBatchId!: string;
 
-  @IsInt()
-  @Min(1)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.000001)
   allocatedQty!: number;
 
   @IsOptional()

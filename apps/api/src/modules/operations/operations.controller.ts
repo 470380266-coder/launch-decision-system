@@ -19,6 +19,7 @@ import { CreateBomVersionDto } from './dto/create-bom-version.dto';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
+import { CreateStockingRequestDto } from './dto/create-stocking-request.dto';
 import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
 import { UpdateBatchStatusDto } from './dto/update-batch-status.dto';
 import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
@@ -47,7 +48,7 @@ export class OperationsController {
   }
 
   @Post('procurement-tracks')
-  @Roles(UserRole.ADMIN, UserRole.PURCHASER)
+  @Roles(UserRole.ADMIN)
   createProcurementTrack(
     @Body() dto: CreateProcurementTrackDto,
     @Req() req: Request,
@@ -99,6 +100,24 @@ export class OperationsController {
   @Roles(UserRole.ADMIN)
   createBomVersion(@Body() dto: CreateBomVersionDto) {
     return this.operationsService.createBomVersion(dto);
+  }
+
+  @Patch('bom-versions/:id/activate')
+  @Roles(UserRole.ADMIN)
+  activateBomVersion(@Param('id') id: string) {
+    return this.operationsService.activateBomVersion(id);
+  }
+
+  @Post('stocking-requests')
+  @Roles(UserRole.ADMIN)
+  createStockingRequest(
+    @Body() dto: CreateStockingRequestDto,
+    @Req() req: Request,
+  ) {
+    return this.operationsService.createStockingRequest(
+      dto,
+      req.user as { id: string; role: UserRole },
+    );
   }
 
   @Post('materials')

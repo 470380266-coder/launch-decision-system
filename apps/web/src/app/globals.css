@@ -2841,9 +2841,111 @@ textarea {
   font-weight: 600;
 }
 
+.admin-bom-meta-grid .highlight em {
+  margin-top: 8px;
+  color: #1b7f3a;
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 600;
+}
+
 .admin-bom-meta-grid .count {
   font-size: 28px;
   font-weight: 600;
+}
+
+.admin-bom-version-panel {
+  margin: 0 26px 24px;
+}
+
+.admin-bom-section-head {
+  margin: 0 26px 12px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+
+.admin-bom-version-panel .admin-bom-section-head {
+  margin: 0 0 12px;
+}
+
+.admin-bom-section-head h4 {
+  margin: 0;
+  color: #171717;
+  font-size: 15px;
+  font-weight: 600;
+}
+
+.admin-bom-section-head span {
+  color: #666;
+  font-size: 13px;
+}
+
+.admin-bom-version-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #ebebeb;
+  border-radius: 8px;
+}
+
+.admin-bom-version-table {
+  width: 100%;
+  min-width: 680px;
+  border-collapse: collapse;
+  font-size: 14px;
+}
+
+.admin-bom-version-table th,
+.admin-bom-version-table td {
+  height: 52px;
+  padding: 0 16px;
+  border-bottom: 1px solid #ebebeb;
+  color: #171717;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-bom-version-table th {
+  height: 44px;
+  background: #fafafa;
+  color: #666;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.admin-bom-version-table tr:last-child td {
+  border-bottom: 0;
+}
+
+.bom-status {
+  height: 24px;
+  padding: 0 8px;
+  display: inline-flex;
+  align-items: center;
+  border-radius: 5px;
+  background: #f2f2f2;
+  color: #666;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.bom-status.active {
+  background: #e8f7e9;
+  color: #1b7f3a;
+}
+
+.admin-bom-version-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  white-space: nowrap;
+}
+
+.admin-bom-version-actions .ops-primary-button,
+.admin-bom-version-actions .ops-secondary-button {
+  height: 34px;
+  padding: 0 14px;
+  font-size: 13px;
 }
 
 .admin-bom-table-wrap {
@@ -2926,7 +3028,10 @@ textarea {
 
 .app-modal-panel {
   position: relative;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
   width: 100%;
+  max-height: calc(100vh - 32px);
   overflow: hidden;
   border-radius: 12px;
   background: #fff;
@@ -2972,6 +3077,9 @@ textarea {
   padding: 16px 20px;
   display: grid;
   gap: 16px;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
 }
 
 .app-modal-footer {
@@ -3130,9 +3238,12 @@ textarea {
 }
 
 .app-bom-editor {
+  max-height: min(420px, 42vh);
   overflow: hidden;
+  overflow-y: auto;
   border: 1px solid #ebebeb;
   border-radius: 8px;
+  overscroll-behavior: contain;
 }
 
 .app-bom-editor-head,
@@ -3155,6 +3266,19 @@ textarea {
 .app-bom-editor-row {
   min-height: 56px;
   border-top: 1px solid #ebebeb;
+}
+
+.app-bom-material-cell {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 8px 0;
+}
+
+.app-bom-new-material-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
 }
 
 .app-bom-delete-button {
@@ -3610,6 +3734,10 @@ textarea {
 
   .app-bom-editor-row {
     padding: 12px;
+  }
+
+  .app-bom-new-material-grid {
+    grid-template-columns: 1fr;
   }
 
   .app-modal-footer {

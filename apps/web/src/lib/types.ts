@@ -99,6 +99,30 @@ export type OperationBootstrap = {
       materialId: string;
       materialCode: string;
       materialName: string;
+      materialSpec?: string | null;
+      materialUnit?: string;
+      unitUsage: number;
+      isSharedMaterial: boolean;
+    }>;
+  }>;
+  bomVersions: Array<{
+    id: string;
+    productId: string;
+    productCode: string;
+    productName: string;
+    versionNo: string;
+    effectiveFrom: string;
+    effectiveTo: string | null;
+    isActive: boolean;
+    remark: string | null;
+    itemCount: number;
+    items: Array<{
+      id: string;
+      materialId: string;
+      materialCode: string;
+      materialName: string;
+      materialSpec?: string | null;
+      materialUnit?: string;
       unitUsage: number;
       isSharedMaterial: boolean;
     }>;
@@ -108,9 +132,13 @@ export type OperationBootstrap = {
     productId: string;
     productCode: string;
     productName: string;
+    productSpec?: string | null;
+    productUnit?: string;
     materialId: string;
     materialCode: string;
     materialName: string;
+    materialSpec?: string | null;
+    materialUnit?: string;
     purchaserName: string;
     supplier: string | null;
     purchaseOrderNo: string | null;
@@ -135,6 +163,10 @@ export type OperationBootstrap = {
     nextFollowUpAt: string | null;
     exceptionNote: string | null;
     note: string | null;
+    stockingRequestId: string | null;
+    stockingRequestNo: string | null;
+    bomVersionId: string | null;
+    bomVersionNo: string | null;
     receiptBatchId: string | null;
   }>;
   pendingBatches: Array<{
@@ -183,6 +215,24 @@ export type ReceiptPayload = {
   productId?: string;
 };
 
+export type ProductPayload = {
+  productCode: string;
+  productName: string;
+  productSpec?: string;
+  unit: string;
+  minStartQty: number;
+  standardProductionDays: number;
+  bufferDays: number;
+  shortWindowDays?: number;
+};
+
+export type MaterialPayload = {
+  materialCode: string;
+  materialName: string;
+  materialSpec?: string;
+  unit: string;
+};
+
 export type ProcurementTrackPayload = {
   productId: string;
   materialId: string;
@@ -198,6 +248,13 @@ export type ProcurementTrackPayload = {
   todoNote?: string;
   exceptionNote?: string;
   note?: string;
+};
+
+export type StockingRequestPayload = {
+  productId: string;
+  targetFinishedQty: number;
+  selectedBomItemIds: string[];
+  remark?: string;
 };
 
 export type ProcurementTrackUpdatePayload = {

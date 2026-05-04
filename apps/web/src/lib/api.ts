@@ -1,4 +1,3 @@
-import { mockOperations, mockProductDetail, mockProducts } from './mock-data';
 import {
   AllocationPayload,
   AuthUser,
@@ -6,13 +5,16 @@ import {
   BatchStatusPayload,
   BomVersionPayload,
   LoginResponse,
+  MaterialPayload,
   OperationBootstrap,
   ProductDetail,
   ProductListItem,
+  ProductPayload,
   ProcurementArrivalPayload,
   ProcurementTrackPayload,
   ProcurementTrackUpdatePayload,
   ReceiptPayload,
+  StockingRequestPayload,
 } from './types';
 
 export const API_BASE =
@@ -20,32 +22,29 @@ export const API_BASE =
   process.env.API_BASE_URL ??
   'http://localhost:3001/api';
 
-async function safeFetch<T>(path: string, fallback: T): Promise<T> {
-  try {
-    const response = await fetch(`${API_BASE}${path}`, {
-      next: { revalidate: 3600 },
-    });
+async function safeFetch<T>(path: string): Promise<T> {
+  const response = await fetch(`${API_BASE}${path}`, {
+    next: { revalidate: 3600 },
+  });
 
-    if (!response.ok) {
-      return fallback;
-    }
-
-    return (await response.json()) as T;
-  } catch {
-    return fallback;
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(readErrorMessage(text) || `GET ${path} failed`);
   }
+
+  return (await response.json()) as T;
 }
 
 export async function getProducts(): Promise<ProductListItem[]> {
-  return safeFetch('/products', mockProducts);
+  return safeFetch('/products');
 }
 
 export async function getProductDetail(id: string): Promise<ProductDetail> {
-  return safeFetch(`/products/${id}`, mockProductDetail);
+  return safeFetch(`/products/${id}`);
 }
 
 export async function getOperationsBootstrap(): Promise<OperationBootstrap> {
-  return safeFetch('/operations/bootstrap', mockOperations);
+  return safeFetch('/operations/bootstrap');
 }
 
 async function postJson<TInput, TOutput>(
@@ -112,11 +111,39 @@ export function createReceipt(payload: ReceiptPayload, token: string) {
   return postJson('/operations/receipts', payload, token);
 }
 
+export function createProduct(payload: ProductPayload, token: string) {
+  return postJson<ProductPayload, { id: string; code: string; name: string; bomVersionId: string | null }>(
+    '/products',
+    payload,
+    token,
+  );
+}
+
+export function createMaterial(payload: MaterialPayload, token: string) {
+  return postJson<
+    MaterialPayload,
+    { id: string; code: string; name: string; spec: string | null; unit: string }
+  >('/operations/materials', payload, token);
+}
+
 export function createProcurementTrack(
   payload: ProcurementTrackPayload,
   token: string,
 ) {
   return postJson('/operations/procurement-tracks', payload, token);
+}
+
+export function createStockingRequest(payload: StockingRequestPayload, token: string) {
+  return postJson<
+    StockingRequestPayload,
+    {
+      id: string;
+      requestNo: string;
+      productId: string;
+      bomVersionId: string;
+      createdTrackCount: number;
+    }
+  >('/operations/stocking-requests', payload, token);
 }
 
 export function updateProcurementTrack(
@@ -141,6 +168,10 @@ export function createAllocation(payload: AllocationPayload, token: string) {
 
 export function createBomVersion(payload: BomVersionPayload, token: string) {
   return postJson('/operations/bom-versions', payload, token);
+}
+
+export function activateBomVersion(bomVersionId: string, token: string) {
+  return patchJson(`/operations/bom-versions/${bomVersionId}/activate`, {}, token);
 }
 
 export function updateBatchStatus(

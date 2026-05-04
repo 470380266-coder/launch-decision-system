@@ -18,6 +18,7 @@ import { CreateBomVersionDto } from './dto/create-bom-version.dto';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
+import { CreateStockingRequestDto } from './dto/create-stocking-request.dto';
 import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
 import { UpdateBatchStatusDto } from './dto/update-batch-status.dto';
 import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
@@ -36,6 +37,7 @@ export class OperationsService {
       purchasers,
       admins,
       activeBoms,
+      bomVersions,
       procurementTracks,
       pendingBatches,
       sharedReceipts,
@@ -72,6 +74,24 @@ export class OperationsService {
           },
           orderBy: [{ product: { productCode: 'asc' } }, { versionNo: 'asc' }],
         }),
+        this.prisma.bomVersion.findMany({
+          include: {
+            product: true,
+            items: {
+              include: {
+                material: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
+          },
+          orderBy: [
+            { product: { productCode: 'asc' } },
+            { effectiveFrom: 'desc' },
+            { createdAt: 'desc' },
+          ],
+        }),
         this.prisma.materialProcurementTrack.findMany({
           where:
             user.role === UserRole.PURCHASER
@@ -81,6 +101,8 @@ export class OperationsService {
             product: true,
             material: true,
             purchaser: true,
+            stockingRequest: true,
+            bomVersion: true,
             receiptBatch: true,
             receiptLinks: {
               include: {
@@ -198,6 +220,28 @@ export class OperationsService {
           isSharedMaterial: item.isSharedMaterial,
         })),
       })),
+      bomVersions: bomVersions.map((bom) => ({
+        id: bom.id,
+        productId: bom.productId,
+        productCode: bom.product.productCode,
+        productName: bom.product.productName,
+        versionNo: bom.versionNo,
+        effectiveFrom: bom.effectiveFrom,
+        effectiveTo: bom.effectiveTo,
+        isActive: bom.isActive,
+        remark: bom.remark,
+        itemCount: bom.items.length,
+        items: bom.items.map((item) => ({
+          id: item.id,
+          materialId: item.materialId,
+          materialCode: item.material.materialCode,
+          materialName: item.material.materialName,
+          materialSpec: item.material.materialSpec,
+          materialUnit: item.material.unit,
+          unitUsage: item.unitUsage,
+          isSharedMaterial: item.isSharedMaterial,
+        })),
+      })),
       procurementTracks: procurementTracks.map((track) => ({
         id: track.id,
         productId: track.productId,
@@ -229,6 +273,10 @@ export class OperationsService {
         nextFollowUpAt: track.nextFollowUpAt,
         exceptionNote: track.exceptionNote,
         note: track.note,
+        stockingRequestId: track.stockingRequestId,
+        stockingRequestNo: track.stockingRequest?.requestNo ?? null,
+        bomVersionId: track.bomVersionId,
+        bomVersionNo: track.bomVersion?.versionNo ?? null,
         receiptBatchId: track.receiptBatchId,
         receiptBatches: track.receiptLinks.map((link) => ({
           id: link.receiptBatchId,
@@ -330,7 +378,8 @@ export class OperationsService {
             allocatedQty,
             remainingQty: Math.max(receipt.arrivedQty - allocatedQty, 0),
           };
-        }),
+        })
+        .filter((receipt) => receipt.remainingQty > 0),
     };
   }
 
@@ -384,10 +433,14 @@ export class OperationsService {
         throw new BadRequestException('Selected product does not match a non-shared BOM item');
       }
     }
+    const targetBomItem = dto.productId
+      ? nonSharedCandidates.find((item) => item.bomVersion.productId === dto.productId)
+      : null;
 
     const receipt = await this.prisma.materialReceiptBatch.create({
       data: {
         materialId: dto.materialId,
+        bomItemId: targetBomItem?.id,
         receiptBatchNo: dto.receiptBatchNo,
         arrivedQty: dto.arrivedQty,
         arrivedAt: new Date(dto.arrivedAt),
@@ -430,11 +483,22 @@ export class OperationsService {
     if (!material) {
       throw new NotFoundException('Material not found');
     }
+    const bomUsage = await this.prisma.bomItem.findFirst({
+      where: {
+        materialId: dto.materialId,
+        bomVersion: {
+          productId: dto.productId,
+          isActive: true,
+        },
+      },
+    });
 
     return this.prisma.materialProcurementTrack.create({
       data: {
         productId: dto.productId,
         materialId: dto.materialId,
+        bomItemId: bomUsage?.id,
+        bomVersionId: bomUsage?.bomVersionId,
         purchaserUserId: currentUser.id,
         supplier: dto.supplier,
         purchaseOrderNo: dto.purchaseOrderNo,
@@ -457,6 +521,91 @@ export class OperationsService {
     });
   }
 
+  async createStockingRequest(
+    dto: CreateStockingRequestDto,
+    currentUser: { id: string; role: UserRole },
+  ) {
+    const activeBom = await this.prisma.bomVersion.findFirst({
+      where: {
+        productId: dto.productId,
+        isActive: true,
+      },
+      include: {
+        product: true,
+        items: {
+          include: {
+            material: true,
+          },
+          orderBy: {
+            createdAt: 'asc',
+          },
+        },
+      },
+    });
+
+    if (!activeBom) {
+      throw new BadRequestException('当前单品没有生效 BOM，无法发起备货需求');
+    }
+
+    const selectedIds = new Set(dto.selectedBomItemIds);
+    const selectedItems = activeBom.items.filter((item) => selectedIds.has(item.id));
+
+    if (selectedItems.length !== selectedIds.size) {
+      throw new BadRequestException('存在不属于当前生效 BOM 的子料');
+    }
+
+    const purchaser = await this.prisma.user.findFirst({
+      where: {
+        role: UserRole.PURCHASER,
+        status: 'ACTIVE',
+      },
+      orderBy: {
+        username: 'asc',
+      },
+    });
+    const purchaserUserId = purchaser?.id ?? currentUser.id;
+    const requestedAt = new Date();
+    const requestNo = makeStockingRequestNo(requestedAt);
+
+    return this.prisma.$transaction(async (tx) => {
+      const stockingRequest = await tx.stockingRequest.create({
+        data: {
+          productId: activeBom.productId,
+          bomVersionId: activeBom.id,
+          requestNo,
+          targetFinishedQty: dto.targetFinishedQty,
+          requestedByUserId: currentUser.id,
+          requestedAt,
+          remark: dto.remark,
+        },
+      });
+
+      await tx.materialProcurementTrack.createMany({
+        data: selectedItems.map((item) => ({
+          productId: activeBom.productId,
+          materialId: item.materialId,
+          bomItemId: item.id,
+          stockingRequestId: stockingRequest.id,
+          bomVersionId: activeBom.id,
+          purchaserUserId,
+          requiredQty: dto.targetFinishedQty * item.unitUsage,
+          orderedQty: 0,
+          orderStatus: ProcurementOrderStatus.NOT_ORDERED,
+          productionStatus: ProcurementProductionStatus.NOT_STARTED,
+          note: dto.remark,
+        })),
+      });
+
+      return {
+        id: stockingRequest.id,
+        requestNo: stockingRequest.requestNo,
+        productId: stockingRequest.productId,
+        bomVersionId: stockingRequest.bomVersionId,
+        createdTrackCount: selectedItems.length,
+      };
+    });
+  }
+
   async updateProcurementTrack(
     id: string,
     dto: UpdateProcurementTrackDto,
@@ -476,19 +625,25 @@ export class OperationsService {
       throw new BadRequestException('Current user cannot update this procurement track');
     }
 
+    const nextOrderedQty = dto.orderedQty ?? track.orderedQty;
+
     return this.prisma.materialProcurementTrack.update({
       where: { id },
       data: {
+        supplier: dto.supplier,
+        purchaseOrderNo: dto.purchaseOrderNo,
+        orderedQty: dto.orderedQty,
         orderStatus: deriveOrderStatus(
           track.arrivedQty,
-          track.orderedQty,
+          nextOrderedQty,
           dto.orderStatus,
         ),
         productionStatus: deriveProductionStatus(
           track.arrivedQty,
-          track.orderedQty,
+          nextOrderedQty,
           dto.productionStatus,
         ),
+        orderedAt: parseOptionalDate(dto.orderedAt),
         expectedShipAt: parseOptionalDate(dto.expectedShipAt),
         inTransitAt: parseOptionalDate(dto.inTransitAt),
         transitDays: dto.transitDays,
@@ -523,20 +678,24 @@ export class OperationsService {
       throw new BadRequestException('Current user cannot confirm this procurement track');
     }
 
-    const bomUsage = await this.prisma.bomItem.findFirst({
-      where: {
-        materialId: track.materialId,
-        bomVersion: {
-          productId: track.productId,
-          isActive: true,
-        },
-      },
-    });
+    const bomUsage = track.bomItemId
+      ? await this.prisma.bomItem.findUnique({ where: { id: track.bomItemId } })
+      : await this.prisma.bomItem.findFirst({
+          where: {
+            materialId: track.materialId,
+            bomVersion: {
+              productId: track.productId,
+              isActive: true,
+            },
+          },
+        });
 
     const trackUpdate = await this.prisma.$transaction(async (tx) => {
       const receipt = await tx.materialReceiptBatch.create({
         data: {
           materialId: track.materialId,
+          bomItemId: bomUsage?.id,
+          materialFollowUpId: track.id,
           receiptBatchNo: dto.receiptBatchNo,
           arrivedQty: dto.arrivedQty,
           arrivedAt: new Date(dto.arrivedAt),
@@ -699,7 +858,10 @@ export class OperationsService {
       throw new BadRequestException('BOM contains unknown or inactive materials');
     }
 
-    const activate = dto.activate ?? true;
+    const existingBomCount = await this.prisma.bomVersion.count({
+      where: { productId: dto.productId },
+    });
+    const activate = existingBomCount === 0 || dto.activate === true;
     const effectiveFrom = new Date(dto.effectiveFrom);
 
     const bom = await this.prisma.$transaction(async (tx) => {
@@ -746,6 +908,43 @@ export class OperationsService {
     }
 
     return bom;
+  }
+
+  async activateBomVersion(id: string) {
+    const target = await this.prisma.bomVersion.findUnique({
+      where: { id },
+    });
+
+    if (!target) {
+      throw new NotFoundException('BOM version not found');
+    }
+
+    const activatedAt = new Date();
+    const activated = await this.prisma.$transaction(async (tx) => {
+      await tx.bomVersion.updateMany({
+        where: {
+          productId: target.productId,
+          id: { not: target.id },
+          isActive: true,
+        },
+        data: {
+          isActive: false,
+          effectiveTo: activatedAt,
+        },
+      });
+
+      return tx.bomVersion.update({
+        where: { id: target.id },
+        data: {
+          isActive: true,
+          effectiveTo: null,
+        },
+      });
+    });
+
+    await this.recalculateNow();
+
+    return activated;
   }
 
   async createMaterial(dto: CreateMaterialDto) {
@@ -821,6 +1020,20 @@ function parseOptionalDate(value: string | null | undefined) {
   }
 
   return value ? new Date(value) : null;
+}
+
+function makeStockingRequestNo(date: Date) {
+  const pad = (value: number) => String(value).padStart(2, '0');
+  const stamp = [
+    date.getFullYear(),
+    pad(date.getMonth() + 1),
+    pad(date.getDate()),
+    pad(date.getHours()),
+    pad(date.getMinutes()),
+    pad(date.getSeconds()),
+  ].join('');
+
+  return `SR-${stamp}-${date.getMilliseconds().toString().padStart(3, '0')}`;
 }
 
 function deriveOrderStatus(

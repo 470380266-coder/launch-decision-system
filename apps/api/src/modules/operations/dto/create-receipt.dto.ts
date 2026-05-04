@@ -1,4 +1,5 @@
-import { IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { Type } from 'class-transformer';
+import { IsDateString, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateReceiptDto {
   @IsString()
@@ -7,8 +8,9 @@ export class CreateReceiptDto {
   @IsString()
   receiptBatchNo!: string;
 
-  @IsInt()
-  @Min(1)
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0.000001)
   arrivedQty!: number;
 
   @IsDateString()

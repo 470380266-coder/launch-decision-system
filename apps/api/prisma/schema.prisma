@@ -56,6 +56,11 @@ enum ProcurementProductionStatus {
   ARRIVED
 }
 
+enum StockingRequestStatus {
+  CONFIRMED
+  CANCELLED
+}
+
 model User {
   id           String   @id @default(cuid())
   name         String
@@ -69,6 +74,7 @@ model User {
   receiptBatches          MaterialReceiptBatch[]
   sharedMaterialAllocations SharedMaterialAllocation[]
   procurementTracks       MaterialProcurementTrack[]
+  stockingRequests        StockingRequest[]
 }
 
 model Product {
@@ -90,6 +96,7 @@ model Product {
   productionBatches        ProductionBatch[]
   snapshots                ProductSnapshot[]
   procurementTracks        MaterialProcurementTrack[]
+  stockingRequests         StockingRequest[]
 }
 
 model Material {
@@ -121,13 +128,34 @@ model BomVersion {
   product        Product  @relation(fields: [productId], references: [id])
   items          BomItem[]
   productionBatches ProductionBatch[]
+  procurementTracks MaterialProcurementTrack[]
+  stockingRequests StockingRequest[]
+}
+
+model StockingRequest {
+  id                  String   @id @default(cuid())
+  productId           String
+  bomVersionId        String
+  requestNo           String   @unique
+  targetFinishedQty   Float
+  requestedByUserId   String
+  requestedAt         DateTime
+  status              StockingRequestStatus @default(CONFIRMED)
+  remark              String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  product             Product @relation(fields: [productId], references: [id])
+  bomVersion          BomVersion @relation(fields: [bomVersionId], references: [id])
+  requestedBy         User @relation(fields: [requestedByUserId], references: [id])
+  procurementTracks   MaterialProcurementTrack[]
 }
 
 model BomItem {
   id                String   @id @default(cuid())
   bomVersionId      String
   materialId        String
-  unitUsage         Int
+  unitUsage         Float
   isSharedMaterial  Boolean
   lossRate          Float?
   createdAt         DateTime @default(now())
@@ -135,13 +163,17 @@ model BomItem {
 
   bomVersion        BomVersion @relation(fields: [bomVersionId], references: [id])
   material          Material   @relation(fields: [materialId], references: [id])
+  receiptBatches    MaterialReceiptBatch[]
+  procurementTracks MaterialProcurementTrack[]
 }
 
 model MaterialReceiptBatch {
   id                String   @id @default(cuid())
   materialId        String
+  bomItemId         String?
+  materialFollowUpId String?
   receiptBatchNo    String
-  arrivedQty        Int
+  arrivedQty        Float
   arrivedAt         DateTime
   purchaserUserId   String
   sourceType        String
@@ -150,10 +182,12 @@ model MaterialReceiptBatch {
   updatedAt         DateTime @updatedAt
 
   material          Material @relation(fields: [materialId], references: [id])
+  bomItem           BomItem? @relation(fields: [bomItemId], references: [id])
+  materialFollowUp  MaterialProcurementTrack? @relation("ReceiptFollowUp", fields: [materialFollowUpId], references: [id])
   purchaser         User @relation(fields: [purchaserUserId], references: [id])
   receiptBatchLinks ReceiptBatchLink[]
   sharedAllocations SharedMaterialAllocation[]
-  procurementTracks MaterialProcurementTrack[]
+  procurementTracks MaterialProcurementTrack[] @relation("LatestTrackReceipt")
   procurementTrackReceipts ProcurementTrackReceipt[]
 }
 
@@ -161,13 +195,16 @@ model MaterialProcurementTrack {
   id                    String   @id @default(cuid())
   productId             String
   materialId            String
+  bomItemId             String?
+  stockingRequestId     String?
+  bomVersionId          String?
   purchaserUserId       String
   receiptBatchId        String?
   supplier              String?
   purchaseOrderNo       String?
-  requiredQty           Int
-  orderedQty            Int
-  arrivedQty            Int      @default(0)
+  requiredQty           Float
+  orderedQty            Float
+  arrivedQty            Float    @default(0)
   orderStatus           ProcurementOrderStatus @default(NOT_ORDERED)
   productionStatus      ProcurementProductionStatus @default(NOT_STARTED)
   orderedAt             DateTime?
@@ -186,8 +223,12 @@ model MaterialProcurementTrack {
 
   product               Product @relation(fields: [productId], references: [id])
   material              Material @relation(fields: [materialId], references: [id])
+  bomItem               BomItem? @relation(fields: [bomItemId], references: [id])
+  stockingRequest       StockingRequest? @relation(fields: [stockingRequestId], references: [id])
+  bomVersion            BomVersion? @relation(fields: [bomVersionId], references: [id])
   purchaser             User @relation(fields: [purchaserUserId], references: [id])
-  receiptBatch          MaterialReceiptBatch? @relation(fields: [receiptBatchId], references: [id])
+  receiptBatch          MaterialReceiptBatch? @relation("LatestTrackReceipt", fields: [receiptBatchId], references: [id])
+  materialReceiptBatches MaterialReceiptBatch[] @relation("ReceiptFollowUp")
   receiptLinks          ProcurementTrackReceipt[]
 }
 
@@ -195,7 +236,7 @@ model ProcurementTrackReceipt {
   id                    String   @id @default(cuid())
   procurementTrackId    String
   receiptBatchId        String
-  arrivedQty            Int
+  arrivedQty            Float
   createdAt             DateTime @default(now())
   updatedAt             DateTime @updatedAt
 
@@ -209,7 +250,7 @@ model ReceiptBatchLink {
   id              String   @id @default(cuid())
   receiptBatchId  String
   productId       String
-  linkedQty       Int
+  linkedQty       Float
   createdAt       DateTime @default(now())
   updatedAt       DateTime @updatedAt
 
@@ -243,7 +284,7 @@ model SharedMaterialAllocation {
   id                  String   @id @default(cuid())
   receiptBatchId      String
   productionBatchId   String
-  allocatedQty        Int
+  allocatedQty        Float
   allocatedByUserId   String
   allocatedAt         DateTime
   note                String?

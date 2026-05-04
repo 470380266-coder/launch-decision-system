@@ -1,13 +1,13 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class ConfirmProcurementArrivalDto {
   @IsString()
   receiptBatchNo!: string;
 
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsNumber()
+  @Min(0.000001)
   arrivedQty!: number;
 
   @IsDateString()

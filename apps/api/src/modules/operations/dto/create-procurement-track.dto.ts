@@ -1,5 +1,5 @@
 import { Type } from 'class-transformer';
-import { IsDateString, IsInt, IsOptional, IsString, Min } from 'class-validator';
+import { IsDateString, IsInt, IsNumber, IsOptional, IsString, Min } from 'class-validator';
 
 export class CreateProcurementTrackDto {
   @IsString()
@@ -17,12 +17,12 @@ export class CreateProcurementTrackDto {
   purchaseOrderNo?: string;
 
   @Type(() => Number)
-  @IsInt()
-  @Min(1)
+  @IsNumber()
+  @Min(0.000001)
   requiredQty!: number;
 
   @Type(() => Number)
-  @IsInt()
+  @IsNumber()
   @Min(0)
   orderedQty!: number;
 

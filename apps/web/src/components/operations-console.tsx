@@ -3,10 +3,13 @@
 import Link from 'next/link';
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import {
+  activateBomVersion,
   confirmProcurementArrival,
   createAllocation,
   createBomVersion,
-  createProcurementTrack,
+  createMaterial,
+  createProduct,
+  createStockingRequest,
   getCurrentUser,
   getOperationsBootstrapAuthed,
   updateBatchActual,
@@ -49,6 +52,14 @@ function toDateTimeLocal(input: string | null | undefined) {
   const date = new Date(input);
   const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
   return localDate.toISOString().slice(0, 16);
+}
+
+function formatDemandQty(value: number) {
+  if (!Number.isFinite(value)) {
+    return '0';
+  }
+
+  return Number(value.toFixed(6)).toString();
 }
 
 function roleName(role: AuthUser['role']) {
@@ -417,20 +428,6 @@ function ProcurementWorkspace({
   startTransition,
   token,
 }: WorkspaceProps) {
-  const [trackForm, setTrackForm] = useState({
-    productId: data.products[0]?.id ?? '',
-    materialId: data.materials[0]?.id ?? '',
-    supplier: '',
-    purchaseOrderNo: '',
-    requiredQty: 1,
-    orderedQty: 1,
-    orderedAt: '',
-    expectedShipAt: '',
-    expectedArriveAt: '',
-    nextFollowUpAt: '',
-    todoNote: '',
-    note: '',
-  });
   const [editTrackId, setEditTrackId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     orderedQty: 0,
@@ -454,10 +451,8 @@ function ProcurementWorkspace({
     'ALL' | 'TODO' | 'ORDERED' | 'PARTIAL' | 'ARRIVED' | 'SHORT'
   >('ALL');
   const [search, setSearch] = useState('');
-  const [showCreateTrack, setShowCreateTrack] = useState(false);
 
   function openEdit(track: OperationBootstrap['procurementTracks'][number]) {
-    setShowCreateTrack(false);
     setEditTrackId(track.id);
     setArrivalTrackId(track.id);
     setEditForm({
@@ -476,47 +471,6 @@ function ProcurementWorkspace({
       arrivedQty: Math.max(track.orderedQty - track.arrivedQty, 1),
       arrivedAt: toDateTimeLocal(track.actualArriveAt) || new Date().toISOString().slice(0, 16),
       note: '',
-    });
-  }
-
-  function handleCreateTrack(event: React.FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    onMessage(null);
-    onError(null);
-
-    startTransition(async () => {
-      try {
-        await createProcurementTrack(
-          {
-            ...trackForm,
-            supplier: trackForm.supplier || undefined,
-            purchaseOrderNo: trackForm.purchaseOrderNo || undefined,
-            requiredQty: Number(trackForm.requiredQty),
-            orderedQty: Number(trackForm.orderedQty),
-            orderedAt: trackForm.orderedAt || undefined,
-            expectedShipAt: trackForm.expectedShipAt || undefined,
-            expectedArriveAt: trackForm.expectedArriveAt || undefined,
-            nextFollowUpAt: trackForm.nextFollowUpAt || undefined,
-            todoNote: trackForm.todoNote || undefined,
-            note: trackForm.note || undefined,
-          },
-          token,
-        );
-        await onRefresh();
-        onMessage('采购跟进已新增');
-        setShowCreateTrack(false);
-        setTrackForm((current) => ({
-          ...current,
-          purchaseOrderNo: '',
-          requiredQty: 1,
-          orderedQty: 1,
-          orderedAt: '',
-          todoNote: '',
-          note: '',
-        }));
-      } catch (submissionError) {
-        onError(submissionError instanceof Error ? submissionError.message : '新增失败');
-      }
     });
   }
 
@@ -676,13 +630,6 @@ function ProcurementWorkspace({
                   value={search}
                 />
               </label>
-              <button
-                className="purchase-create-button"
-                onClick={() => setShowCreateTrack(true)}
-                type="button"
-              >
-                + 新增跟进
-              </button>
             </div>
 
             <div className="purchase-filter-row">
@@ -744,7 +691,10 @@ function ProcurementWorkspace({
                               `PO-${track.materialCode}`}
                           </div>
                         </td>
-                        <td>{track.orderedQty || track.requiredQty} pcs</td>
+                        <td>
+                          {formatDemandQty(track.orderedQty || track.requiredQty)}{' '}
+                          {track.materialUnit ?? 'pcs'}
+                        </td>
                         <td>
                           <span
                             className={`purchase-status ${
@@ -772,7 +722,7 @@ function ProcurementWorkspace({
                         >
                           {delta}
                         </td>
-                        <td>{track.receiptBatchNo ?? '-'}</td>
+                        <td>{track.stockingRequestNo ?? track.receiptBatchNo ?? '-'}</td>
                         <td>
                           <button onClick={() => openEdit(track)} type="button">
                             编辑
@@ -792,180 +742,6 @@ function ProcurementWorkspace({
             </table>
           </div>
         </section>
-
-        <Modal
-          footer={
-            <>
-              <AppButton
-                onClick={() => setShowCreateTrack(false)}
-                type="button"
-                variant="secondary"
-              >
-                取消
-              </AppButton>
-              <AppButton
-                disabled={isPending}
-                form="create-procurement-track"
-                type="submit"
-              >
-                保存跟进
-              </AppButton>
-            </>
-          }
-          onClose={() => setShowCreateTrack(false)}
-          open={showCreateTrack}
-          title="新增跟进"
-          width={720}
-        >
-          <form
-            className="purchase-create-form"
-            id="create-procurement-track"
-            onSubmit={handleCreateTrack}
-          >
-            <FormField label="单品" required>
-              <select
-                className={selectCls}
-                value={trackForm.productId}
-                onChange={(event) =>
-                  setTrackForm((current) => ({ ...current, productId: event.target.value }))
-                }
-              >
-                {data.products.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.code} · {product.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="子物料" required>
-              <select
-                className={selectCls}
-                value={trackForm.materialId}
-                onChange={(event) =>
-                  setTrackForm((current) => ({ ...current, materialId: event.target.value }))
-                }
-              >
-                {data.materials.map((material) => (
-                  <option key={material.id} value={material.id}>
-                    {material.code} · {material.name}
-                  </option>
-                ))}
-              </select>
-            </FormField>
-            <FormField label="供应商">
-              <input
-                className={inputCls}
-                placeholder="请输入供应商"
-                value={trackForm.supplier}
-                onChange={(event) =>
-                  setTrackForm((current) => ({ ...current, supplier: event.target.value }))
-                }
-              />
-            </FormField>
-            <FormField label="采购单">
-              <input
-                className={inputCls}
-                placeholder="请输入采购单号"
-                value={trackForm.purchaseOrderNo}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    purchaseOrderNo: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="需求数量">
-              <input
-                className={inputCls}
-                min={1}
-                type="number"
-                value={trackForm.requiredQty}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    requiredQty: Number(event.target.value),
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="下单数量">
-              <input
-                className={inputCls}
-                min={0}
-                type="number"
-                value={trackForm.orderedQty}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    orderedQty: Number(event.target.value),
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="下单时间">
-              <input
-                className={inputCls}
-                type="datetime-local"
-                value={trackForm.orderedAt}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    orderedAt: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="预计发货">
-              <input
-                className={inputCls}
-                type="datetime-local"
-                value={trackForm.expectedShipAt}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    expectedShipAt: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="预计到货">
-              <input
-                className={inputCls}
-                type="datetime-local"
-                value={trackForm.expectedArriveAt}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    expectedArriveAt: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="下次跟进">
-              <input
-                className={inputCls}
-                type="datetime-local"
-                value={trackForm.nextFollowUpAt}
-                onChange={(event) =>
-                  setTrackForm((current) => ({
-                    ...current,
-                    nextFollowUpAt: event.target.value,
-                  }))
-                }
-              />
-            </FormField>
-            <FormField label="待办提醒">
-              <input
-                className={inputCls}
-                value={trackForm.todoNote}
-                onChange={(event) =>
-                  setTrackForm((current) => ({ ...current, todoNote: event.target.value }))
-                }
-              />
-            </FormField>
-          </form>
-        </Modal>
       </div>
     </PageTransition>
   );
@@ -1111,6 +887,7 @@ function PurchaseEditView({
           <PurchaseField label="已下单数量">
             <input
               min={0}
+              step="any"
               type="number"
               value={editForm.orderedQty}
               onChange={(event) =>
@@ -1270,7 +1047,8 @@ function PurchaseEditView({
           </PurchaseField>
           <PurchaseField label="到货数量">
             <input
-              min={1}
+              min={0.000001}
+              step="any"
               type="number"
               value={arrivalForm.arrivedQty}
               onChange={(event) =>
@@ -1844,8 +1622,9 @@ function BatchEditView({
                       ))}
                     </select>
                     <input
-                      min={1}
+                      min={0.000001}
                       max={maxAllocQty || 1}
+                      step="any"
                       type="number"
                       value={draft.allocatedQty}
                       onChange={(event) =>
@@ -1974,17 +1753,25 @@ function ProductWorkspace({
   token,
 }: WorkspaceProps) {
   const [selectedProductId, setSelectedProductId] = useState(data.products[0]?.id ?? '');
+  const [previewBomVersionId, setPreviewBomVersionId] = useState<string | null>(null);
   const [showProductModal, setShowProductModal] = useState(false);
   const [showSubMaterialModal, setShowSubMaterialModal] = useState(false);
   const [showBomModal, setShowBomModal] = useState(false);
+  const [showStockingModal, setShowStockingModal] = useState(false);
+  const [stockingForm, setStockingForm] = useState<StockingRequestDraft>({
+    targetFinishedQty: '1',
+    remark: '',
+    selectedBomItemIds: [],
+  });
   const [bomForm, setBomForm] = useState<BomFormDraft>({
     productId: data.products[0]?.id ?? '',
     versionNo: 'BOM-V2',
     effectiveFrom: new Date().toISOString().slice(0, 16),
     remark: '',
-    activate: true,
+    activate: false,
     items: [
       {
+        materialMode: 'existing',
         materialId: data.materials[0]?.id ?? '',
         unitUsage: 1,
         isSharedMaterial: false,
@@ -1993,6 +1780,40 @@ function ProductWorkspace({
   });
   const selectedBom = data.activeBoms.find((bom) => bom.productId === selectedProductId);
   const selectedProduct = data.products.find((product) => product.id === selectedProductId);
+  const selectedBomVersions = data.bomVersions.filter(
+    (bom) => bom.productId === selectedProductId,
+  );
+  const previewBom =
+    selectedBomVersions.find((bom) => bom.id === previewBomVersionId) ??
+    selectedBomVersions.find((bom) => bom.isActive);
+  const hasOpenProductionBatch = data.pendingBatches.some(
+    (batch) =>
+      batch.productId === selectedProductId &&
+      (batch.status === 'PENDING' || batch.status === 'PAUSED'),
+  );
+
+  function openBomModal() {
+    setBomForm((current) => ({
+      ...current,
+      productId: selectedProductId,
+      activate: selectedBomVersions.length === 0,
+    }));
+    setShowBomModal(true);
+  }
+
+  function openStockingModal() {
+    if (!selectedBom) {
+      onError('当前单品没有生效 BOM，无法发起备货需求');
+      return;
+    }
+
+    setStockingForm({
+      targetFinishedQty: '1',
+      remark: '',
+      selectedBomItemIds: selectedBom.items.map((item) => item.id),
+    });
+    setShowStockingModal(true);
+  }
 
   function saveBomVersion() {
     onMessage(null);
@@ -2005,15 +1826,44 @@ function ProductWorkspace({
 
     startTransition(async () => {
       try {
+        const items = await Promise.all(
+          bomForm.items.map(async (item) => {
+            if (item.materialMode !== 'new') {
+              return {
+                materialId: item.materialId,
+                unitUsage: Number(item.unitUsage),
+                isSharedMaterial: item.isSharedMaterial,
+              };
+            }
+
+            if (!item.materialName?.trim() || !item.materialCode?.trim()) {
+              throw new Error('请输入新增子料的名称和编码');
+            }
+
+            const material = await createMaterial(
+              {
+                materialName: item.materialName,
+                materialCode: item.materialCode,
+                materialSpec: item.materialSpec || undefined,
+                unit: item.materialUnit || 'pcs',
+              },
+              token,
+            );
+
+            return {
+              materialId: material.id,
+              unitUsage: Number(item.unitUsage),
+              isSharedMaterial: item.isSharedMaterial,
+            };
+          }),
+        );
+
         await createBomVersion(
           {
             ...bomForm,
             productId: selectedProductId,
             remark: bomForm.remark || undefined,
-            items: bomForm.items.map((item) => ({
-              ...item,
-              unitUsage: Number(item.unitUsage),
-            })),
+            items,
           },
           token,
         );
@@ -2023,10 +1873,128 @@ function ProductWorkspace({
           ...current,
           versionNo: 'BOM-V2',
           remark: '',
+          activate: false,
         }));
         setShowBomModal(false);
       } catch (submissionError) {
         onError(submissionError instanceof Error ? submissionError.message : 'BOM 保存失败');
+      }
+    });
+  }
+
+  function activateBom(version: OperationBootstrap['bomVersions'][number]) {
+    if (version.isActive) {
+      setPreviewBomVersionId(version.id);
+      return;
+    }
+
+    if (
+      hasOpenProductionBatch &&
+      !window.confirm('当前存在未完成生产批次，切换 BOM 只影响后续新批次，不影响已有批次。是否继续？')
+    ) {
+      return;
+    }
+
+    onMessage(null);
+    onError(null);
+
+    startTransition(async () => {
+      try {
+        await activateBomVersion(version.id, token);
+        await onRefresh();
+        setPreviewBomVersionId(version.id);
+        onMessage('BOM 版本已启用');
+      } catch (submissionError) {
+        onError(submissionError instanceof Error ? submissionError.message : '启用 BOM 失败');
+      }
+    });
+  }
+
+  function saveProduct(draft: ProductDraft) {
+    onMessage(null);
+    onError(null);
+
+    startTransition(async () => {
+      try {
+        const created = await createProduct(
+          {
+            productCode: draft.code,
+            productName: draft.name,
+            productSpec: draft.spec || undefined,
+            unit: draft.unit,
+            minStartQty: Number(draft.minQty),
+            standardProductionDays: Number(draft.stdDays),
+            bufferDays: Number(draft.bufferDays),
+            shortWindowDays: Number(draft.windowDays),
+          },
+          token,
+        );
+        await onRefresh();
+        setSelectedProductId(created.id);
+        setBomForm((current) => ({ ...current, productId: created.id }));
+        setShowProductModal(false);
+        onMessage('单品已新增');
+      } catch (submissionError) {
+        onError(submissionError instanceof Error ? submissionError.message : '新增单品失败');
+      }
+    });
+  }
+
+  function saveMaterial(draft: MaterialDraft) {
+    onMessage(null);
+    onError(null);
+
+    startTransition(async () => {
+      try {
+        await createMaterial(
+          {
+            materialCode: draft.code,
+            materialName: draft.name,
+            materialSpec: draft.spec || undefined,
+            unit: draft.unit,
+          },
+          token,
+        );
+        await onRefresh();
+        setShowSubMaterialModal(false);
+        onMessage('子料件已新增');
+      } catch (submissionError) {
+        onError(submissionError instanceof Error ? submissionError.message : '新增子料件失败');
+      }
+    });
+  }
+
+  function saveStockingRequest() {
+    onMessage(null);
+    onError(null);
+
+    const targetFinishedQty = Number(stockingForm.targetFinishedQty);
+    if (!selectedProductId || !Number.isFinite(targetFinishedQty) || targetFinishedQty <= 0) {
+      onError('请输入大于 0 的目标成品数量');
+      return;
+    }
+
+    if (stockingForm.selectedBomItemIds.length === 0) {
+      onError('请至少选择一个子料生成采购跟进');
+      return;
+    }
+
+    startTransition(async () => {
+      try {
+        const created = await createStockingRequest(
+          {
+            productId: selectedProductId,
+            targetFinishedQty,
+            selectedBomItemIds: stockingForm.selectedBomItemIds,
+            remark: stockingForm.remark || undefined,
+          },
+          token,
+        );
+        await onRefresh();
+        setShowStockingModal(false);
+        onMessage(`备货需求 ${created.requestNo} 已生成 ${created.createdTrackCount} 条采购跟进`);
+      } catch (submissionError) {
+        onError(submissionError instanceof Error ? submissionError.message : '发起备货需求失败');
       }
     });
   }
@@ -2074,6 +2042,7 @@ function ProductWorkspace({
                   key={product.id}
                   onClick={() => {
                     setSelectedProductId(product.id);
+                    setPreviewBomVersionId(null);
                     setBomForm((current) => ({ ...current, productId: product.id }));
                   }}
                   type="button"
@@ -2097,22 +2066,30 @@ function ProductWorkspace({
               <h3>{selectedProduct?.name ?? '未选择单品'}</h3>
               <p>{selectedProduct?.code ?? '—'}</p>
             </div>
-            <button
-              className="ops-primary-button"
-              onClick={() => {
-                setBomForm((current) => ({ ...current, productId: selectedProductId }));
-                setShowBomModal(true);
-              }}
-              type="button"
-            >
-              新增 BOM 版本
-            </button>
+            <div className="admin-bom-version-actions">
+              <button
+                className="ops-secondary-button"
+                disabled={!selectedBom}
+                onClick={openStockingModal}
+                type="button"
+              >
+                发起备货需求
+              </button>
+              <button
+                className="ops-primary-button"
+                onClick={openBomModal}
+                type="button"
+              >
+                新增 BOM 版本
+              </button>
+            </div>
           </div>
 
           <div className="admin-bom-meta-grid">
             <div className="highlight">
               <span>当前 BOM</span>
               <strong>{selectedBom?.versionNo ?? '—'}</strong>
+              {selectedBom ? <em>当前生效</em> : null}
             </div>
             <div>
               <span>生效时间</span>
@@ -2124,6 +2101,71 @@ function ProductWorkspace({
             </div>
           </div>
 
+          <div className="admin-bom-version-panel">
+            <div className="admin-bom-section-head">
+              <h4>BOM 版本列表</h4>
+              <span>共 {selectedBomVersions.length} 个版本</span>
+            </div>
+            <div className="admin-bom-version-table-wrap">
+              <table className="admin-bom-version-table">
+                <thead>
+                  <tr>
+                    <th>版本号</th>
+                    <th>状态</th>
+                    <th>生效时间</th>
+                    <th>子料数量</th>
+                    <th>操作</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {selectedBomVersions.length ? (
+                    selectedBomVersions.map((bom) => (
+                      <tr key={bom.id}>
+                        <td>{bom.versionNo}</td>
+                        <td>
+                          <span className={bom.isActive ? 'bom-status active' : 'bom-status'}>
+                            {bom.isActive ? '当前生效' : '未生效'}
+                          </span>
+                        </td>
+                        <td>{formatDate(bom.effectiveFrom)}</td>
+                        <td>{bom.itemCount}</td>
+                        <td>
+                          <div className="admin-bom-version-actions">
+                            <button
+                              className="ops-secondary-button"
+                              onClick={() => setPreviewBomVersionId(bom.id)}
+                              type="button"
+                            >
+                              查看
+                            </button>
+                            {bom.isActive ? null : (
+                              <button
+                                className="ops-primary-button"
+                                disabled={isPending}
+                                onClick={() => activateBom(bom)}
+                                type="button"
+                              >
+                                启用此版本
+                              </button>
+                            )}
+                          </div>
+                        </td>
+                      </tr>
+                    ))
+                  ) : (
+                    <tr>
+                      <td colSpan={5}>暂无 BOM 版本</td>
+                    </tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div className="admin-bom-section-head">
+            <h4>{previewBom?.isActive ? '当前生效 BOM 子料' : '查看 BOM 子料'}</h4>
+            <span>{previewBom?.versionNo ?? '—'}</span>
+          </div>
           <div className="admin-bom-table-wrap">
             <table className="admin-bom-table">
               <thead>
@@ -2136,12 +2178,12 @@ function ProductWorkspace({
                 </tr>
               </thead>
               <tbody>
-                {selectedBom?.items.length ? (
-                  selectedBom.items.map((item) => (
+                {previewBom?.items.length ? (
+                  previewBom.items.map((item) => (
                     <tr key={item.id}>
                       <td>{item.materialCode}</td>
                       <td>{item.materialName}</td>
-                      <td className="muted">{data.materials.find((material) => material.id === item.materialId)?.unit ?? '—'}</td>
+                      <td className="muted">{item.materialSpec ?? item.materialUnit ?? '—'}</td>
                       <td>{item.unitUsage}</td>
                       <td>
                         <span className={item.isSharedMaterial ? 'bom-type shared' : 'bom-type'}>
@@ -2164,12 +2206,12 @@ function ProductWorkspace({
       <AddProductModal
         open={showProductModal}
         onClose={() => setShowProductModal(false)}
-        onSubmit={() => onMessage('新增单品表单已确认，后端创建接口待接入')}
+        onSubmit={saveProduct}
       />
       <AddSubMaterialModal
         open={showSubMaterialModal}
         onClose={() => setShowSubMaterialModal(false)}
-        onSubmit={() => onMessage('新增子料件表单已确认，后端创建接口待接入')}
+        onSubmit={saveMaterial}
       />
       <AddBomModal
         bomForm={bomForm}
@@ -2179,6 +2221,16 @@ function ProductWorkspace({
         onSave={saveBomVersion}
         open={showBomModal}
         setBomForm={setBomForm}
+      />
+      <StockingRequestModal
+        bom={selectedBom}
+        draft={stockingForm}
+        isPending={isPending}
+        onClose={() => setShowStockingModal(false)}
+        onSave={saveStockingRequest}
+        open={showStockingModal}
+        productName={selectedProduct?.name ?? ''}
+        setDraft={setStockingForm}
       />
     </div>
   );
@@ -2191,10 +2243,39 @@ type BomFormDraft = {
   remark: string;
   activate: boolean;
   items: Array<{
+    materialMode?: 'existing' | 'new';
     materialId: string;
+    materialName?: string;
+    materialCode?: string;
+    materialSpec?: string;
+    materialUnit?: string;
     unitUsage: number;
     isSharedMaterial: boolean;
   }>;
+};
+
+type ProductDraft = {
+  code: string;
+  name: string;
+  spec: string;
+  unit: string;
+  minQty: string;
+  stdDays: number;
+  bufferDays: number;
+  windowDays: number;
+};
+
+type MaterialDraft = {
+  code: string;
+  name: string;
+  spec: string;
+  unit: string;
+};
+
+type StockingRequestDraft = {
+  targetFinishedQty: string;
+  remark: string;
+  selectedBomItemIds: string[];
 };
 
 function AddProductModal({
@@ -2204,14 +2285,14 @@ function AddProductModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: () => void;
+  onSubmit: (draft: ProductDraft) => void;
 }) {
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<ProductDraft>({
     code: '',
     name: '',
     spec: '',
     unit: '件',
-    minQty: 1,
+    minQty: '1',
     stdDays: 5,
     bufferDays: 2,
     windowDays: 7,
@@ -2221,8 +2302,7 @@ function AddProductModal({
     if (!draft.code || !draft.name) {
       return;
     }
-    onSubmit();
-    onClose();
+    onSubmit(draft);
   }
 
   return (
@@ -2243,18 +2323,18 @@ function AddProductModal({
       width={640}
     >
       <div className="app-modal-grid">
-        <FormField label="单品编码" required>
-          <input
-            className={inputCls}
-            value={draft.code}
-            onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
-          />
-        </FormField>
         <FormField label="单品名称" required>
           <input
             className={inputCls}
             value={draft.name}
             onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="单品编码" required>
+          <input
+            className={inputCls}
+            value={draft.code}
+            onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
           />
         </FormField>
         <FormField label="规格(净含量)">
@@ -2278,7 +2358,7 @@ function AddProductModal({
             type="number"
             value={draft.minQty}
             onChange={(event) =>
-              setDraft((current) => ({ ...current, minQty: Number(event.target.value) }))
+              setDraft((current) => ({ ...current, minQty: event.target.value }))
             }
           />
         </FormField>
@@ -2327,9 +2407,9 @@ function AddSubMaterialModal({
 }: {
   open: boolean;
   onClose: () => void;
-  onSubmit: () => void;
+  onSubmit: (draft: MaterialDraft) => void;
 }) {
-  const [draft, setDraft] = useState({
+  const [draft, setDraft] = useState<MaterialDraft>({
     code: '',
     name: '',
     spec: '',
@@ -2340,9 +2420,8 @@ function AddSubMaterialModal({
     if (!draft.code || !draft.name) {
       return;
     }
-    onSubmit();
+    onSubmit(draft);
     setDraft({ code: '', name: '', spec: '', unit: 'pcs' });
-    onClose();
   }
 
   return (
@@ -2363,18 +2442,18 @@ function AddSubMaterialModal({
       width={600}
     >
       <div className="app-modal-grid">
-        <FormField label="子料编码" required>
-          <input
-            className={inputCls}
-            value={draft.code}
-            onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
-          />
-        </FormField>
         <FormField label="子料名称" required>
           <input
             className={inputCls}
             value={draft.name}
             onChange={(event) => setDraft((current) => ({ ...current, name: event.target.value }))}
+          />
+        </FormField>
+        <FormField label="子料编码" required>
+          <input
+            className={inputCls}
+            value={draft.code}
+            onChange={(event) => setDraft((current) => ({ ...current, code: event.target.value }))}
           />
         </FormField>
         <FormField label="规格">
@@ -2391,6 +2470,138 @@ function AddSubMaterialModal({
             onChange={(event) => setDraft((current) => ({ ...current, unit: event.target.value }))}
           />
         </FormField>
+      </div>
+    </Modal>
+  );
+}
+
+function StockingRequestModal({
+  bom,
+  draft,
+  isPending,
+  onClose,
+  onSave,
+  open,
+  productName,
+  setDraft,
+}: {
+  bom: OperationBootstrap['activeBoms'][number] | undefined;
+  draft: StockingRequestDraft;
+  isPending: boolean;
+  onClose: () => void;
+  onSave: () => void;
+  open: boolean;
+  productName: string;
+  setDraft: React.Dispatch<React.SetStateAction<StockingRequestDraft>>;
+}) {
+  const targetFinishedQty = Number(draft.targetFinishedQty);
+  const previewQty = Number.isFinite(targetFinishedQty) ? targetFinishedQty : 0;
+
+  function toggleBomItem(itemId: string, checked: boolean) {
+    setDraft((current) => ({
+      ...current,
+      selectedBomItemIds: checked
+        ? [...new Set([...current.selectedBomItemIds, itemId])]
+        : current.selectedBomItemIds.filter((selectedId) => selectedId !== itemId),
+    }));
+  }
+
+  return (
+    <Modal
+      footer={
+        <>
+          <AppButton onClick={onClose} type="button" variant="secondary">
+            取消
+          </AppButton>
+          <AppButton disabled={isPending} onClick={onSave} type="button">
+            确认生成
+          </AppButton>
+        </>
+      }
+      onClose={onClose}
+      open={open}
+      title="发起备货需求"
+      width={920}
+    >
+      <div className="app-modal-grid">
+        <FormField label="单品">
+          <input className={inputCls} disabled value={productName} />
+        </FormField>
+        <FormField label="当前 BOM">
+          <input className={inputCls} disabled value={bom?.versionNo ?? '—'} />
+        </FormField>
+        <FormField label="目标成品数量" required>
+          <input
+            className={inputCls}
+            min={0.000001}
+            step="any"
+            type="number"
+            value={draft.targetFinishedQty}
+            onChange={(event) =>
+              setDraft((current) => ({
+                ...current,
+                targetFinishedQty: event.target.value,
+              }))
+            }
+          />
+        </FormField>
+        <FormField label="备注">
+          <input
+            className={inputCls}
+            value={draft.remark}
+            onChange={(event) =>
+              setDraft((current) => ({ ...current, remark: event.target.value }))
+            }
+          />
+        </FormField>
+      </div>
+
+      <div className="admin-bom-table-wrap">
+        <table className="admin-bom-table">
+          <thead>
+            <tr>
+              <th>生成</th>
+              <th>子料名称</th>
+              <th>子料编码</th>
+              <th>单耗</th>
+              <th>需求数量</th>
+              <th>用料类型</th>
+            </tr>
+          </thead>
+          <tbody>
+            {bom?.items.length ? (
+              bom.items.map((item) => {
+                const checked = draft.selectedBomItemIds.includes(item.id);
+                return (
+                  <tr key={item.id}>
+                    <td>
+                      <input
+                        checked={checked}
+                        onChange={(event) => toggleBomItem(item.id, event.target.checked)}
+                        type="checkbox"
+                      />
+                    </td>
+                    <td>{item.materialName}</td>
+                    <td>{item.materialCode}</td>
+                    <td>{item.unitUsage}</td>
+                    <td>
+                      {formatDemandQty(previewQty * item.unitUsage)} {item.materialUnit ?? 'pcs'}
+                    </td>
+                    <td>
+                      <span className={item.isSharedMaterial ? 'bom-type shared' : 'bom-type'}>
+                        {item.isSharedMaterial ? '共用料' : '非共用料'}
+                      </span>
+                    </td>
+                  </tr>
+                );
+              })
+            ) : (
+              <tr>
+                <td colSpan={6}>当前单品没有生效 BOM 子料。</td>
+              </tr>
+            )}
+          </tbody>
+        </table>
       </div>
     </Modal>
   );
@@ -2415,7 +2626,7 @@ function AddBomModal({
 }) {
   function updateBomItem(
     index: number,
-    patch: Partial<{ materialId: string; unitUsage: number; isSharedMaterial: boolean }>,
+    patch: Partial<BomFormDraft['items'][number]>,
   ) {
     setBomForm((current) => ({
       ...current,
@@ -2437,7 +2648,32 @@ function AddBomModal({
                 items: [
                   ...current.items,
                   {
+                    materialMode: 'existing',
                     materialId: materials[0]?.id ?? '',
+                    unitUsage: 1,
+                    isSharedMaterial: false,
+                  },
+                ],
+              }))
+            }
+            type="button"
+            variant="secondary"
+          >
+            选择已有子料
+          </AppButton>
+          <AppButton
+            onClick={() =>
+              setBomForm((current) => ({
+                ...current,
+                items: [
+                  ...current.items,
+                  {
+                    materialMode: 'new',
+                    materialId: '',
+                    materialName: '',
+                    materialCode: '',
+                    materialSpec: '',
+                    materialUnit: 'pcs',
                     unitUsage: 1,
                     isSharedMaterial: false,
                   },
@@ -2515,20 +2751,74 @@ function AddBomModal({
         </div>
         {bomForm.items.map((item, index) => (
           <div className="app-bom-editor-row" key={`${index}-${item.materialId}`}>
-            <select
-              className={selectCls}
-              value={item.materialId}
-              onChange={(event) => updateBomItem(index, { materialId: event.target.value })}
-            >
-              {materials.map((material) => (
-                <option key={material.id} value={material.id}>
-                  {material.code}・{material.name}・{material.unit}
-                </option>
-              ))}
-            </select>
+            <div className="app-bom-material-cell">
+              <select
+                className={selectCls}
+                value={item.materialMode ?? 'existing'}
+                onChange={(event) =>
+                  updateBomItem(index, {
+                    materialMode: event.target.value as 'existing' | 'new',
+                    materialId:
+                      event.target.value === 'existing' ? materials[0]?.id ?? '' : '',
+                  })
+                }
+              >
+                <option value="existing">选择已有子料</option>
+                <option value="new">新增子料</option>
+              </select>
+              {(item.materialMode ?? 'existing') === 'new' ? (
+                <div className="app-bom-new-material-grid">
+                  <input
+                    className={inputCls}
+                    placeholder="子料名称"
+                    value={item.materialName ?? ''}
+                    onChange={(event) =>
+                      updateBomItem(index, { materialName: event.target.value })
+                    }
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder="子料编码"
+                    value={item.materialCode ?? ''}
+                    onChange={(event) =>
+                      updateBomItem(index, { materialCode: event.target.value })
+                    }
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder="规格"
+                    value={item.materialSpec ?? ''}
+                    onChange={(event) =>
+                      updateBomItem(index, { materialSpec: event.target.value })
+                    }
+                  />
+                  <input
+                    className={inputCls}
+                    placeholder="单位"
+                    value={item.materialUnit ?? 'pcs'}
+                    onChange={(event) =>
+                      updateBomItem(index, { materialUnit: event.target.value })
+                    }
+                  />
+                </div>
+              ) : (
+                <select
+                  className={selectCls}
+                  value={item.materialId}
+                  onChange={(event) => updateBomItem(index, { materialId: event.target.value })}
+                >
+                  {materials.map((material) => (
+                    <option key={material.id} value={material.id}>
+                      {material.code}・{material.name}・{material.unit}
+                    </option>
+                  ))}
+                </select>
+              )}
+            </div>
             <input
               className={inputCls}
-              min={1}
+              min={0.000001}
+              step="any"
               type="number"
               value={item.unitUsage}
               onChange={(event) => updateBomItem(index, { unitUsage: Number(event.target.value) })}

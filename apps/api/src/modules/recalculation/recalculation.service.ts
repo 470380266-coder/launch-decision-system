@@ -119,6 +119,7 @@ export class RecalculationService {
           activeBom.items,
           plannedQty,
         );
+        const hasSharedMaterialBlock = Boolean(batchWithSharedReason.blockingReason);
 
         const launchableQtyNow = await this.prisma.productionBatch.aggregate({
           where: {
@@ -144,20 +145,26 @@ export class RecalculationService {
               gt: now,
               lte: shortTermEnd,
             },
+            blockingReason: null,
           },
           _sum: {
             plannedQty: true,
           },
         });
+        const currentLaunchableQty = launchableQtyNow._sum.plannedQty ?? 0;
 
         await this.writeSnapshot(run.id, product.id, {
-          launchableQtyNow: launchableQtyNow._sum.plannedQty ?? 0,
+          launchableQtyNow: currentLaunchableQty,
           launchableQtyShortTerm: shortTermIncrement._sum.plannedQty ?? 0,
           productState:
-            batchWithSharedReason.batchStatus === ProductionBatchStatus.COMPLETED
+            currentLaunchableQty > 0
               ? ProductState.LAUNCHABLE
+              : hasSharedMaterialBlock
+                ? ProductState.BLOCKED
               : ProductState.SCHEDULABLE,
-          nextLaunchDate: batchWithSharedReason.predictedLaunchDate,
+          nextLaunchDate: hasSharedMaterialBlock
+            ? null
+            : batchWithSharedReason.predictedLaunchDate,
           reasonSummary:
             batchWithSharedReason.blockingReason ??
             `已形成待生产批次 ${batchWithSharedReason.batchNo}，预计可上架`,
