@@ -29,6 +29,16 @@ export class UpdateProcurementTrackDto {
   orderedQty?: number;
 
   @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(0)
+  actualOrderQty?: number;
+
+  @IsOptional()
+  @IsString()
+  partialPurchaseReason?: string | null;
+
+  @IsOptional()
   @IsEnum(ProcurementOrderStatus)
   orderStatus?: ProcurementOrderStatus;
 

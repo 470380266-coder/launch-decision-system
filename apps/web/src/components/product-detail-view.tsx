@@ -46,6 +46,14 @@ function displayState(state: string) {
     return '已完结';
   }
 
+  if (state === 'TARGET_SHORTFALL') {
+    return '目标未达成';
+  }
+
+  if (state === 'SHORT_CLOSED') {
+    return '短缺完结';
+  }
+
   return '受阻';
 }
 

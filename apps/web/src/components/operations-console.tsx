@@ -13,6 +13,7 @@ import {
   createStockingRequest,
   getCurrentUser,
   getOperationsBootstrapAuthed,
+  terminateStockingRequest,
   updateBatchActual,
   updateBatchStatus,
   updateProcurementTrack,
@@ -117,6 +118,9 @@ function purchaseStatusLabel(track: OperationBootstrap['procurementTracks'][numb
   }
   if (track.arrivedQty > 0) {
     return '部分到货';
+  }
+  if (track.isPartialPurchase) {
+    return '部分采购';
   }
   if (track.orderStatus === 'NOT_ORDERED' || track.productionStatus === 'NOT_STARTED') {
     return '缺货';
@@ -459,7 +463,8 @@ function ProcurementWorkspace({
   const [editTrackId, setEditTrackId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
     purchaseOrderNo: '',
-    orderedQty: 0,
+    actualOrderQty: 0,
+    partialPurchaseReason: '',
     orderStatus: 'ORDERED',
     productionStatus: 'IN_PRODUCTION',
     orderedAt: '',
@@ -487,7 +492,8 @@ function ProcurementWorkspace({
     setArrivalTrackId(track.id);
     setEditForm({
       purchaseOrderNo: track.purchaseOrderNo ?? '',
-      orderedQty: track.orderedQty,
+      actualOrderQty: track.actualOrderQty || track.orderedQty,
+      partialPurchaseReason: track.partialPurchaseReason ?? '',
       orderStatus: track.orderStatus,
       productionStatus: track.productionStatus,
       orderedAt: toDateTimeLocal(track.orderedAt),
@@ -500,7 +506,7 @@ function ProcurementWorkspace({
     });
     setArrivalForm({
       receiptBatchNo: track.receiptBatchNo ?? `RB-${track.materialCode}-${Date.now()}`,
-      arrivedQty: Math.max(track.orderedQty - track.arrivedQty, 1),
+      arrivedQty: Math.max((track.actualOrderQty || track.orderedQty) - track.arrivedQty, 1),
       arrivedAt: toDateTimeLocal(track.actualArriveAt) || new Date().toISOString().slice(0, 16),
       note: '',
     });
@@ -513,6 +519,16 @@ function ProcurementWorkspace({
     }
     onMessage(null);
     onError(null);
+    const selectedTrack = data.procurementTracks.find((track) => track.id === editTrackId);
+    if (
+      selectedTrack &&
+      editForm.actualOrderQty > 0 &&
+      editForm.actualOrderQty < selectedTrack.requiredQty &&
+      !editForm.partialPurchaseReason.trim()
+    ) {
+      onError('实际采购数量低于系统需求数量时，必须填写部分采购原因');
+      return;
+    }
 
     startTransition(async () => {
       try {
@@ -520,7 +536,8 @@ function ProcurementWorkspace({
           editTrackId,
           {
             purchaseOrderNo: editForm.purchaseOrderNo || null,
-            orderedQty: Number(editForm.orderedQty),
+            actualOrderQty: Number(editForm.actualOrderQty),
+            partialPurchaseReason: editForm.partialPurchaseReason || null,
             orderedAt: editForm.orderedAt || null,
             orderStatus: editForm.orderStatus as never,
             productionStatus: editForm.productionStatus as never,
@@ -614,7 +631,10 @@ function ProcurementWorkspace({
       return track.orderStatus === 'ORDERED' || track.orderStatus === 'COMPLETED';
     }
     if (filter === 'PARTIAL') {
-      return track.arrivedQty > 0 && track.productionStatus !== 'ARRIVED';
+      return (
+        track.isPartialPurchase ||
+        (track.arrivedQty > 0 && track.productionStatus !== 'ARRIVED')
+      );
     }
     if (filter === 'ARRIVED') {
       return track.productionStatus === 'ARRIVED';
@@ -671,7 +691,7 @@ function ProcurementWorkspace({
                 { id: 'ALL', label: '全部' },
                 { id: 'TODO', label: '待跟进', count: pendingTodos.length },
                 { id: 'ORDERED', label: '已下单', count: orderedCount },
-                { id: 'PARTIAL', label: '部分到货' },
+                { id: 'PARTIAL', label: '部分采购/到货' },
                 { id: 'ARRIVED', label: '全部到货' },
                 { id: 'SHORT', label: '缺货' },
               ].map((item) => (
@@ -723,8 +743,14 @@ function ProcurementWorkspace({
                           </div>
                         </td>
                         <td>
-                          {formatDemandQty(track.orderedQty || track.requiredQty)}{' '}
-                          {track.materialUnit ?? 'pcs'}
+                          <strong>
+                            需 {formatDemandQty(track.requiredQty)} {track.materialUnit ?? 'pcs'}
+                          </strong>
+                          <div>
+                            采 {formatDemandQty(track.actualOrderQty || track.orderedQty)}{' '}
+                            {track.materialUnit ?? 'pcs'}
+                            {track.isPartialPurchase ? ' · 部分采购' : ''}
+                          </div>
                         </td>
                         <td>
                           <span
@@ -797,7 +823,8 @@ function PurchaseEditView({
   };
   editForm: {
     purchaseOrderNo: string;
-    orderedQty: number;
+    actualOrderQty: number;
+    partialPurchaseReason: string;
     orderStatus: string;
     productionStatus: string;
     orderedAt: string;
@@ -822,7 +849,8 @@ function PurchaseEditView({
   onEditChange: React.Dispatch<
     React.SetStateAction<{
       purchaseOrderNo: string;
-      orderedQty: number;
+      actualOrderQty: number;
+      partialPurchaseReason: string;
       orderStatus: string;
       productionStatus: string;
       orderedAt: string;
@@ -850,7 +878,7 @@ function PurchaseEditView({
           },
         ]
       : [];
-  const remainingQty = Math.max(track.orderedQty - track.arrivedQty, 1);
+  const remainingQty = Math.max((track.actualOrderQty || track.orderedQty) - track.arrivedQty, 1);
 
   return (
     <div className="purchase-edit-view">
@@ -935,16 +963,38 @@ function PurchaseEditView({
             </select>
           </PurchaseField>
 
-          <PurchaseField label="已下单数量">
+          <PurchaseField label="系统需求数量">
+            <input disabled value={`${formatDemandQty(track.requiredQty)} ${track.materialUnit ?? 'pcs'}`} />
+          </PurchaseField>
+          <PurchaseField label="实际采购数量">
             <input
               min={0}
               step="any"
               type="number"
-              value={editForm.orderedQty}
+              value={editForm.actualOrderQty}
               onChange={(event) =>
                 onEditChange((current) => ({
                   ...current,
-                  orderedQty: Number(event.target.value),
+                  actualOrderQty: Number(event.target.value),
+                }))
+              }
+            />
+          </PurchaseField>
+          <PurchaseField label="部分采购原因">
+            <input
+              disabled={
+                !(editForm.actualOrderQty > 0 && editForm.actualOrderQty < track.requiredQty)
+              }
+              placeholder={
+                editForm.actualOrderQty > 0 && editForm.actualOrderQty < track.requiredQty
+                  ? '实际采购数量低于系统需求数量时必填'
+                  : '未部分采购'
+              }
+              value={editForm.partialPurchaseReason}
+              onChange={(event) =>
+                onEditChange((current) => ({
+                  ...current,
+                  partialPurchaseReason: event.target.value,
                 }))
               }
             />
@@ -1239,18 +1289,35 @@ const stockingStatusLabels: Record<StockingRequestRecord['status'], string> = {
   READY_TO_BATCH: '已达开工门槛',
   BATCH_CREATED: '已生成批次',
   ALLOCATED: '已分配完',
+  TARGET_SHORTFALL_ALLOCATED: '已分配完但目标未达成',
+  COMPLETED: '正常完结',
+  SHORT_CLOSED: '短缺完结',
   CANCELLED: '已取消',
 };
 
 function stockingStatusClass(status: StockingRequestRecord['status']) {
-  if (status === 'BATCH_CREATED' || status === 'READY_TO_BATCH') {
+  if (status === 'BATCH_CREATED' || status === 'READY_TO_BATCH' || status === 'COMPLETED') {
     return 'status-launchable';
   }
-  if (status === 'CANCELLED' || status === 'ALLOCATED') {
+  if (
+    status === 'CANCELLED' ||
+    status === 'ALLOCATED' ||
+    status === 'TARGET_SHORTFALL_ALLOCATED' ||
+    status === 'SHORT_CLOSED'
+  ) {
     return 'status-blocked';
   }
 
   return 'status-schedulable';
+}
+
+function canCreateGapRestockRequest(request: StockingRequestRecord) {
+  return (
+    request.targetGapQty > 0 &&
+    request.remainingRestockGapQty > 0 &&
+    request.remainingAllocatableQty === 0 &&
+    (request.status === 'TARGET_SHORTFALL_ALLOCATED' || request.status === 'ALLOCATED')
+  );
 }
 
 function StockingRequestWorkspace({
@@ -1265,11 +1332,15 @@ function StockingRequestWorkspace({
   const selectedRequest = selectedRequestId
     ? data.stockingRequests.find((request) => request.id === selectedRequestId)
     : null;
+  const selectedActiveBom = selectedRequest
+    ? data.activeBoms.find((bom) => bom.productId === selectedRequest.productId)
+    : undefined;
 
   if (selectedRequest) {
     return (
       <PageTransition k={`stocking-${selectedRequest.id}`}>
         <StockingRequestDetail
+          activeBom={selectedActiveBom}
           isPending={isPending}
           onBack={() => setSelectedRequestId(null)}
           onError={onError}
@@ -1302,6 +1373,7 @@ function StockingRequestWorkspace({
                   <th>当前状态</th>
                   <th>子料进度</th>
                   <th>本轮上架分配</th>
+                  <th>目标缺口</th>
                   <th>关键缺口</th>
                   <th>发起时间</th>
                   <th>操作</th>
@@ -1337,6 +1409,7 @@ function StockingRequestWorkspace({
                           {formatDemandQty(request.allocatedLaunchQty)}
                         </div>
                       </td>
+                      <td>{formatDemandQty(request.targetGapQty)}</td>
                       <td>{request.criticalGap}</td>
                       <td>{formatDate(request.requestedAt)}</td>
                       <td>
@@ -1352,7 +1425,7 @@ function StockingRequestWorkspace({
                   ))
                 ) : (
                   <tr>
-                    <td className="purchase-empty" colSpan={8}>
+                    <td className="purchase-empty" colSpan={9}>
                       暂无备货需求。请先在单品管理中发起备货需求。
                     </td>
                   </tr>
@@ -1368,6 +1441,7 @@ function StockingRequestWorkspace({
 }
 
 function StockingRequestDetail({
+  activeBom,
   isPending,
   onBack,
   onError,
@@ -1376,6 +1450,7 @@ function StockingRequestDetail({
   request,
   token,
 }: {
+  activeBom: OperationBootstrap['activeBoms'][number] | undefined;
   isPending: boolean;
   onBack: () => void;
   onError: (message: string | null) => void;
@@ -1390,7 +1465,45 @@ function StockingRequestDetail({
     allocatedQty: '',
     note: '',
   });
-  const canAllocate = request.remainingAllocatableQty > 0 && request.status !== 'ALLOCATED';
+  const [terminateReason, setTerminateReason] = useState('');
+  const [restockForm, setRestockForm] = useState<StockingRequestDraft>({
+    targetFinishedQty: String(request.remainingRestockGapQty || request.targetGapQty || 1),
+    remark: `承接 ${request.requestNo} 目标缺口 ${formatDemandQty(request.remainingRestockGapQty || request.targetGapQty)}`,
+    selectedBomItemIds: activeBom?.items.map((item) => item.id) ?? [],
+  });
+  const [showRestockForm, setShowRestockForm] = useState(false);
+  const [showCloseForm, setShowCloseForm] = useState(false);
+  const canRestockGap = canCreateGapRestockRequest(request);
+  const isClosedRequest =
+    request.status === 'COMPLETED' ||
+    request.status === 'SHORT_CLOSED' ||
+    request.status === 'CANCELLED';
+  const canAllocate = request.remainingAllocatableQty > 0 && !isClosedRequest;
+  const canShortClose = request.remainingRestockGapQty > 0 && !isClosedRequest;
+  const shouldShowGapResolution =
+    request.targetGapQty > 0 &&
+    request.remainingAllocatableQty === 0 &&
+    (request.status === 'TARGET_SHORTFALL_ALLOCATED' ||
+      request.status === 'ALLOCATED') &&
+    !isClosedRequest;
+  const hasHandledRestockGap =
+    shouldShowGapResolution && request.remainingRestockGapQty <= 0;
+
+  useEffect(() => {
+    setRestockForm({
+      targetFinishedQty: String(request.remainingRestockGapQty || request.targetGapQty || 1),
+      remark: `承接 ${request.requestNo} 目标缺口 ${formatDemandQty(request.remainingRestockGapQty || request.targetGapQty)}`,
+      selectedBomItemIds: activeBom?.items.map((item) => item.id) ?? [],
+    });
+    setShowRestockForm(false);
+    setShowCloseForm(false);
+  }, [
+    activeBom?.id,
+    request.id,
+    request.remainingRestockGapQty,
+    request.requestNo,
+    request.targetGapQty,
+  ]);
 
   function saveLaunchAllocation(event: React.FormEvent<HTMLFormElement>) {
     event.preventDefault();
@@ -1431,6 +1544,93 @@ function StockingRequestDetail({
     });
   }
 
+  function createGapRestockRequest() {
+    onMessage(null);
+    onError(null);
+
+    if (!activeBom) {
+      onError('当前单品没有生效 BOM，无法再次发起备货');
+      return;
+    }
+    if (!activeBom.items.length) {
+      onError('当前生效 BOM 没有子料，无法再次发起备货');
+      return;
+    }
+    if (request.targetGapQty <= 0) {
+      onError('当前备货任务没有目标缺口');
+      return;
+    }
+    if (request.remainingRestockGapQty <= 0) {
+      onError('当前目标缺口已发起补货，不可重复补货');
+      return;
+    }
+    const targetFinishedQty = Number(restockForm.targetFinishedQty);
+    if (!Number.isFinite(targetFinishedQty) || targetFinishedQty <= 0) {
+      onError('请输入大于 0 的补货数量');
+      return;
+    }
+    if (!restockForm.selectedBomItemIds.length) {
+      onError('请至少选择一个子料生成采购跟进');
+      return;
+    }
+
+    startAllocationTransition(async () => {
+      try {
+        const created = await createStockingRequest(
+          {
+            productId: request.productId,
+            targetFinishedQty,
+            selectedBomItemIds: restockForm.selectedBomItemIds,
+            remark: restockForm.remark || undefined,
+            sourceStockingRequestId: request.id,
+          },
+          token,
+        );
+        await onRefresh();
+        setShowRestockForm(false);
+        onMessage(`已按剩余数量发起备货需求 ${created.requestNo}`);
+      } catch (submissionError) {
+        onError(friendlyError(submissionError, '再次发起备货失败'));
+      }
+    });
+  }
+
+  function saveShortClose(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onMessage(null);
+    onError(null);
+
+    if (!terminateReason.trim()) {
+      onError('短缺完结必须填写终止原因');
+      return;
+    }
+
+    startAllocationTransition(async () => {
+      try {
+        await terminateStockingRequest(
+          request.id,
+          { reason: terminateReason.trim() },
+          token,
+        );
+        setTerminateReason('');
+        setShowCloseForm(false);
+        await onRefresh();
+        onMessage('本轮备货已短缺完结');
+      } catch (submissionError) {
+        onError(friendlyError(submissionError, '短缺完结失败'));
+      }
+    });
+  }
+
+  function toggleRestockBomItem(itemId: string, checked: boolean) {
+    setRestockForm((current) => ({
+      ...current,
+      selectedBomItemIds: checked
+        ? [...new Set([...current.selectedBomItemIds, itemId])]
+        : current.selectedBomItemIds.filter((selectedId) => selectedId !== itemId),
+    }));
+  }
+
   return (
     <div className="stocking-detail-view">
       <div className="batch-detail-topline">
@@ -1464,6 +1664,7 @@ function StockingRequestDetail({
             ['本轮可上架量', formatDemandQty(request.roundLaunchQty)],
             ['已分配上架量', formatDemandQty(request.allocatedLaunchQty)],
             ['剩余可分配上架量', formatDemandQty(request.remainingAllocatableQty)],
+            ['目标缺口', formatDemandQty(request.targetGapQty)],
             ['当前最小齐套量', formatDemandQty(request.currentMinKitQty)],
             ['最低开工门槛', request.minStartQty],
             ['关键缺口', request.criticalGap],
@@ -1475,7 +1676,187 @@ function StockingRequestDetail({
             </div>
           ))}
         </div>
+        {request.terminatedReason ? (
+          <p className="stocking-warning">
+            短缺完结原因：{request.terminatedReason}
+          </p>
+        ) : null}
       </section>
+
+      {shouldShowGapResolution ? (
+        <section className="ops-list-card stocking-resolution-card">
+          <div className="ops-list-header">
+            <div className="ops-list-title">
+              <h2>目标缺口处理</h2>
+              <p>
+                {hasHandledRestockGap
+                  ? '目标缺口已由补货请求承接。'
+                  : '本轮可上架量已经分配完，但目标备货量仍有缺口。'}
+              </p>
+            </div>
+          </div>
+          <div className="stocking-warning">
+            {hasHandledRestockGap
+              ? '当前待处理缺口 0，已按目标缺口发起补货。'
+              : `待处理目标缺口 ${formatDemandQty(request.remainingRestockGapQty)}。可以按剩余数量发起下一轮备货，或填写原因关闭本轮。`}
+          </div>
+          <div className="stocking-resolution-actions">
+            {canRestockGap ? (
+              <button
+                disabled={isPending || isSavingAllocation}
+                onClick={() => {
+                  setShowRestockForm(true);
+                  setShowCloseForm(false);
+                }}
+                type="button"
+              >
+                补货
+              </button>
+            ) : null}
+            {canShortClose ? (
+              <button
+                disabled={isPending || isSavingAllocation}
+                onClick={() => {
+                  setShowCloseForm(true);
+                  setShowRestockForm(false);
+                }}
+                type="button"
+              >
+                关闭本轮备货
+              </button>
+            ) : (
+              <button disabled type="button">
+                关闭本轮备货
+              </button>
+            )}
+          </div>
+          {canRestockGap && showRestockForm ? (
+            <form className="stocking-restock-form" onSubmit={(event) => {
+              event.preventDefault();
+              createGapRestockRequest();
+            }}>
+              <div className="purchase-arrival-form stocking-restock-fields">
+                <PurchaseField label="补货数量">
+                  <input
+                    min={0.000001}
+                    step="any"
+                    type="number"
+                    value={restockForm.targetFinishedQty}
+                    onChange={(event) =>
+                      setRestockForm((current) => ({
+                        ...current,
+                        targetFinishedQty: event.target.value,
+                      }))
+                    }
+                  />
+                </PurchaseField>
+                <PurchaseField label="备注">
+                  <input
+                    value={restockForm.remark}
+                    onChange={(event) =>
+                      setRestockForm((current) => ({
+                        ...current,
+                        remark: event.target.value,
+                      }))
+                    }
+                  />
+                </PurchaseField>
+              </div>
+              <div className="ops-table-scroll stocking-restock-table">
+                <table className="ops-admin-table">
+                  <thead>
+                    <tr>
+                      <th>生成</th>
+                      <th>子料名称</th>
+                      <th>子料编码</th>
+                      <th>单耗</th>
+                      <th>需求数量</th>
+                      <th>用料类型</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {activeBom?.items.length ? (
+                    activeBom.items.map((item) => {
+                      const checked = restockForm.selectedBomItemIds.includes(item.id);
+                      const previewQty = Number(restockForm.targetFinishedQty);
+
+                      return (
+                        <tr key={item.id}>
+                          <td>
+                            <input
+                              checked={checked}
+                              onChange={(event) =>
+                                toggleRestockBomItem(item.id, event.target.checked)
+                              }
+                              type="checkbox"
+                            />
+                          </td>
+                          <td>{item.materialName}</td>
+                          <td>{item.materialCode}</td>
+                          <td>{item.unitUsage}</td>
+                          <td>
+                            {formatDemandQty(
+                              Number.isFinite(previewQty) ? previewQty * item.unitUsage : 0,
+                            )}{' '}
+                            {item.materialUnit ?? 'pcs'}
+                          </td>
+                          <td>
+                            <span className={item.isSharedMaterial ? 'bom-type shared' : 'bom-type'}>
+                              {item.isSharedMaterial ? '共用料' : '非共用料'}
+                            </span>
+                          </td>
+                        </tr>
+                      );
+                    })
+                    ) : (
+                      <tr>
+                        <td className="purchase-empty" colSpan={6}>
+                          当前单品没有生效 BOM 子料。
+                        </td>
+                      </tr>
+                    )}
+                  </tbody>
+                </table>
+              </div>
+              <div className="purchase-arrival-actions stocking-action-row">
+                <button
+                  disabled={isPending || isSavingAllocation}
+                  onClick={() => setShowRestockForm(false)}
+                  type="button"
+                >
+                  取消补货
+                </button>
+                <button disabled={isPending || isSavingAllocation} type="submit">
+                  发起补货
+                </button>
+              </div>
+            </form>
+          ) : null}
+          {canShortClose && showCloseForm ? (
+            <form className="purchase-arrival-form stocking-close-form" onSubmit={saveShortClose}>
+              <PurchaseField label="关闭原因">
+                <input
+                  placeholder="说明为何本轮目标不再继续补齐"
+                  value={terminateReason}
+                  onChange={(event) => setTerminateReason(event.target.value)}
+                />
+              </PurchaseField>
+              <div className="purchase-arrival-actions">
+                <button
+                  disabled={isPending || isSavingAllocation}
+                  onClick={() => setShowCloseForm(false)}
+                  type="button"
+                >
+                  取消关闭
+                </button>
+                <button disabled={isPending || isSavingAllocation} type="submit">
+                  关闭本轮备货
+                </button>
+              </div>
+            </form>
+          ) : null}
+        </section>
+      ) : null}
 
       <section className="ops-list-card">
         <div className="ops-list-header">
@@ -1587,11 +1968,12 @@ function StockingRequestDetail({
               <tr>
                 <th>子料名称</th>
                 <th>需求数量</th>
+                <th>实际采购数量</th>
                 <th>已到货数量</th>
                 <th>缺口数量</th>
                 <th>跟进状态</th>
                 <th>预计时间</th>
-                <th>跟进备注</th>
+                <th>部分采购原因 / 跟进备注</th>
                 <th>是否共用料</th>
               </tr>
             </thead>
@@ -1604,6 +1986,10 @@ function StockingRequestDetail({
                   </td>
                   <td>
                     {formatDemandQty(track.requiredQty)} {track.materialUnit}
+                  </td>
+                  <td>
+                    {formatDemandQty(track.actualOrderQty)} {track.materialUnit}
+                    {track.isPartialPurchase ? <div>部分采购</div> : null}
                   </td>
                   <td>
                     {formatDemandQty(track.arrivedQty)} {track.materialUnit}
@@ -1619,7 +2005,7 @@ function StockingRequestDetail({
                     <strong>{formatDate(track.expectedArriveAt)}</strong>
                     <div>发货 {formatDate(track.expectedShipAt)}</div>
                   </td>
-                  <td>{track.note ?? '—'}</td>
+                  <td>{track.partialPurchaseReason ?? track.note ?? '—'}</td>
                   <td>
                     <span className={track.isSharedMaterial ? 'bom-type shared' : 'bom-type'}>
                       {track.isSharedMaterial ? '共用料' : '非共用料'}

@@ -3,6 +3,8 @@ import { getProducts } from '@/lib/api';
 import { HomeActions } from '@/components/home-actions';
 import { StatusChip } from '@/components/status-chip';
 
+export const dynamic = 'force-dynamic';
+
 function formatDate(input: string | null) {
   if (!input) {
     return '待确认';

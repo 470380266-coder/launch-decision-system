@@ -1,12 +1,9 @@
 import { notFound } from 'next/navigation';
 import { HomeActions } from '@/components/home-actions';
 import { ProductDetailView } from '@/components/product-detail-view';
-import { getProductDetail, getProducts } from '@/lib/api';
+import { getProductDetail } from '@/lib/api';
 
-export async function generateStaticParams() {
-  const products = await getProducts();
-  return products.map((product) => ({ id: product.id }));
-}
+export const dynamic = 'force-dynamic';
 
 export default async function ProductDetailPage({
   params,

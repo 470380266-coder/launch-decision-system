@@ -1,4 +1,10 @@
-export type ProductState = 'LAUNCHABLE' | 'SCHEDULABLE' | 'BLOCKED' | 'COMPLETED';
+export type ProductState =
+  | 'LAUNCHABLE'
+  | 'SCHEDULABLE'
+  | 'BLOCKED'
+  | 'COMPLETED'
+  | 'TARGET_SHORTFALL'
+  | 'SHORT_CLOSED';
 
 export type ProductListItem = {
   id: string;
@@ -136,6 +142,7 @@ export type OperationBootstrap = {
   stockingRequests: Array<{
     id: string;
     requestNo: string;
+    sourceStockingRequestId: string | null;
     productId: string;
     productName: string;
     targetFinishedQty: number;
@@ -147,6 +154,9 @@ export type OperationBootstrap = {
       | 'READY_TO_BATCH'
       | 'BATCH_CREATED'
       | 'ALLOCATED'
+      | 'TARGET_SHORTFALL_ALLOCATED'
+      | 'COMPLETED'
+      | 'SHORT_CLOSED'
       | 'CANCELLED';
     totalMaterialCount: number;
     followedMaterialCount: number;
@@ -159,6 +169,11 @@ export type OperationBootstrap = {
     roundLaunchQty: number;
     allocatedLaunchQty: number;
     remainingAllocatableQty: number;
+    targetGapQty: number;
+    restockedQty: number;
+    remainingRestockGapQty: number;
+    terminatedReason: string | null;
+    terminatedAt: string | null;
     launchAllocations: Array<{
       id: string;
       allocationTarget: string;
@@ -174,6 +189,9 @@ export type OperationBootstrap = {
       materialCode: string;
       materialUnit: string;
       requiredQty: number;
+      actualOrderQty: number;
+      isPartialPurchase: boolean;
+      partialPurchaseReason: string | null;
       arrivedQty: number;
       gapQty: number;
       orderStatus: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
@@ -206,6 +224,9 @@ export type OperationBootstrap = {
     purchaseOrderNo: string | null;
     requiredQty: number;
     orderedQty: number;
+    actualOrderQty: number;
+    isPartialPurchase: boolean;
+    partialPurchaseReason: string | null;
     arrivedQty: number;
     orderStatus: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
     productionStatus:
@@ -319,11 +340,14 @@ export type StockingRequestPayload = {
   targetFinishedQty: number;
   selectedBomItemIds: string[];
   remark?: string;
+  sourceStockingRequestId?: string;
 };
 
 export type ProcurementTrackUpdatePayload = {
   purchaseOrderNo?: string | null;
   orderedQty?: number;
+  actualOrderQty?: number;
+  partialPurchaseReason?: string | null;
   orderedAt?: string | null;
   orderStatus?: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
   productionStatus?:

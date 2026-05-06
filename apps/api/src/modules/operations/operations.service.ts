@@ -21,6 +21,7 @@ import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
 import { CreateStockingRequestDto } from './dto/create-stocking-request.dto';
+import { TerminateStockingRequestDto } from './dto/terminate-stocking-request.dto';
 import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
 import { UpdateBatchStatusDto } from './dto/update-batch-status.dto';
 import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
@@ -297,6 +298,29 @@ export class OperationsService {
                 roundLaunchQty - allocatedLaunchQty,
                 0,
               );
+              const targetGapQty = Math.max(
+                request.targetFinishedQty - roundLaunchQty,
+                0,
+              );
+              const restockedQty = stockingRequests
+                .filter(
+                  (restockRequest) =>
+                    restockRequest.id !== request.id &&
+                    restockRequest.productId === request.productId &&
+                    restockRequest.status !== StockingRequestStatus.CANCELLED &&
+                    restockRequest.status !== StockingRequestStatus.SHORT_CLOSED &&
+                    (restockRequest.sourceStockingRequestId === request.id ||
+                      restockRequest.remark?.includes(`承接 ${request.requestNo}`)),
+                )
+                .reduce(
+                  (sum, restockRequest) =>
+                    sum + restockRequest.targetFinishedQty,
+                  0,
+                );
+              const remainingRestockGapQty = Math.max(
+                targetGapQty - restockedQty,
+                0,
+              );
               const totalMaterialCount = request.procurementTracks.length;
               const followedMaterialCount = request.procurementTracks.filter(
                 isProcurementTrackFollowed,
@@ -312,6 +336,7 @@ export class OperationsService {
               return {
                 id: request.id,
                 requestNo: request.requestNo,
+                sourceStockingRequestId: request.sourceStockingRequestId,
                 productId: request.productId,
                 productName: request.product.productName,
                 targetFinishedQty: request.targetFinishedQty,
@@ -323,6 +348,9 @@ export class OperationsService {
                   currentMinKitQty,
                   request.product.minStartQty,
                   followedMaterialCount,
+                  roundLaunchQty,
+                  remainingAllocatableQty,
+                  request.targetFinishedQty,
                 ),
                 totalMaterialCount,
                 followedMaterialCount,
@@ -335,6 +363,11 @@ export class OperationsService {
                 roundLaunchQty,
                 allocatedLaunchQty,
                 remainingAllocatableQty,
+                targetGapQty,
+                restockedQty,
+                remainingRestockGapQty,
+                terminatedReason: request.terminatedReason,
+                terminatedAt: request.terminatedAt,
                 launchAllocations: request.launchAllocations.map((allocation) => ({
                   id: allocation.id,
                   allocationTarget: allocation.allocationTarget,
@@ -350,6 +383,9 @@ export class OperationsService {
                   materialCode: track.material.materialCode,
                   materialUnit: track.material.unit,
                   requiredQty: track.requiredQty,
+                  actualOrderQty: track.actualOrderQty || track.orderedQty,
+                  isPartialPurchase: track.isPartialPurchase,
+                  partialPurchaseReason: track.partialPurchaseReason,
                   arrivedQty: track.arrivedQty,
                   gapQty: Math.max(track.requiredQty - track.arrivedQty, 0),
                   orderStatus: track.orderStatus,
@@ -379,6 +415,9 @@ export class OperationsService {
         purchaseOrderNo: track.purchaseOrderNo,
         requiredQty: track.requiredQty,
         orderedQty: track.orderedQty,
+        actualOrderQty: track.actualOrderQty || track.orderedQty,
+        isPartialPurchase: track.isPartialPurchase,
+        partialPurchaseReason: track.partialPurchaseReason,
         arrivedQty: track.arrivedQty,
         orderStatus: track.orderStatus,
         productionStatus: track.productionStatus,
@@ -626,6 +665,8 @@ export class OperationsService {
         purchaseOrderNo: dto.purchaseOrderNo,
         requiredQty: dto.requiredQty,
         orderedQty: dto.orderedQty,
+        actualOrderQty: dto.orderedQty,
+        isPartialPurchase: dto.orderedQty > 0 && dto.orderedQty < dto.requiredQty,
         orderStatus:
           dto.orderedQty > 0
             ? ProcurementOrderStatus.ORDERED
@@ -676,6 +717,77 @@ export class OperationsService {
       throw new BadRequestException('存在不属于当前生效 BOM 的子料');
     }
 
+    if (dto.sourceStockingRequestId) {
+      const sourceRequest = await this.prisma.stockingRequest.findUnique({
+        where: {
+          id: dto.sourceStockingRequestId,
+        },
+        include: {
+          productionBatches: {
+            include: {
+              actual: true,
+            },
+          },
+        },
+      });
+
+      if (!sourceRequest) {
+        throw new BadRequestException('补货来源备货需求不存在');
+      }
+      if (sourceRequest.productId !== activeBom.productId) {
+        throw new BadRequestException('补货来源与当前单品不一致');
+      }
+
+      const sourceRoundLaunchQty = sourceRequest.productionBatches.reduce(
+        (sum, batch) =>
+          batch.batchStatus === ProductionBatchStatus.COMPLETED
+            ? sum + (batch.actual?.actualLaunchQty ?? 0)
+            : sum,
+        0,
+      );
+      const sourceTargetGapQty = Math.max(
+        sourceRequest.targetFinishedQty - sourceRoundLaunchQty,
+        0,
+      );
+
+      if (sourceTargetGapQty <= 0) {
+        throw new BadRequestException('补货来源备货需求没有目标缺口');
+      }
+
+      const existingRestockRequests = await this.prisma.stockingRequest.findMany({
+        where: {
+          id: {
+            not: sourceRequest.id,
+          },
+          productId: sourceRequest.productId,
+          status: {
+            notIn: [
+              StockingRequestStatus.CANCELLED,
+              StockingRequestStatus.SHORT_CLOSED,
+            ],
+          },
+          OR: [
+            {
+              sourceStockingRequestId: sourceRequest.id,
+            },
+            {
+              remark: {
+                contains: `承接 ${sourceRequest.requestNo}`,
+              },
+            },
+          ],
+        },
+      });
+      const restockedQty = existingRestockRequests.reduce(
+        (sum, request) => sum + request.targetFinishedQty,
+        0,
+      );
+
+      if (restockedQty >= sourceTargetGapQty) {
+        throw new BadRequestException('该备货需求的目标缺口已发起补货，不可重复补货');
+      }
+    }
+
     const purchaser = await this.prisma.user.findFirst({
       where: {
         role: UserRole.PURCHASER,
@@ -696,6 +808,7 @@ export class OperationsService {
           bomVersionId: activeBom.id,
           requestNo,
           targetFinishedQty: dto.targetFinishedQty,
+          sourceStockingRequestId: dto.sourceStockingRequestId,
           requestedByUserId: currentUser.id,
           requestedAt,
           remark: dto.remark,
@@ -712,6 +825,8 @@ export class OperationsService {
           purchaserUserId,
           requiredQty: dto.targetFinishedQty * item.unitUsage,
           orderedQty: 0,
+          actualOrderQty: 0,
+          isPartialPurchase: false,
           orderStatus: ProcurementOrderStatus.NOT_ORDERED,
           productionStatus: ProcurementProductionStatus.NOT_STARTED,
           note: dto.remark,
@@ -747,22 +862,40 @@ export class OperationsService {
       throw new BadRequestException('Current user cannot update this procurement track');
     }
 
-    const nextOrderedQty = dto.orderedQty ?? track.orderedQty;
+    const nextActualOrderQty =
+      dto.actualOrderQty ?? dto.orderedQty ?? track.actualOrderQty ?? track.orderedQty;
+    const nextPartialPurchaseReason =
+      dto.partialPurchaseReason ?? track.partialPurchaseReason;
+    const isPartialPurchase =
+      nextActualOrderQty > 0 && nextActualOrderQty < track.requiredQty;
+
+    if (isPartialPurchase && !nextPartialPurchaseReason?.trim()) {
+      throw new BadRequestException('实际采购数量低于系统需求数量时，必须填写部分采购原因');
+    }
 
     return this.prisma.materialProcurementTrack.update({
       where: { id },
       data: {
         supplier: dto.supplier,
         purchaseOrderNo: dto.purchaseOrderNo,
-        orderedQty: dto.orderedQty,
+        orderedQty:
+          dto.actualOrderQty !== undefined
+            ? dto.actualOrderQty
+            : dto.orderedQty,
+        actualOrderQty:
+          dto.actualOrderQty !== undefined
+            ? dto.actualOrderQty
+            : dto.orderedQty,
+        isPartialPurchase,
+        partialPurchaseReason: isPartialPurchase ? nextPartialPurchaseReason : null,
         orderStatus: deriveOrderStatus(
           track.arrivedQty,
-          nextOrderedQty,
+          nextActualOrderQty,
           dto.orderStatus,
         ),
         productionStatus: deriveProductionStatus(
           track.arrivedQty,
-          nextOrderedQty,
+          nextActualOrderQty,
           dto.productionStatus,
         ),
         orderedAt: parseOptionalDate(dto.orderedAt),
@@ -856,10 +989,13 @@ export class OperationsService {
           actualArriveAt: new Date(dto.arrivedAt),
           productionStatus: deriveProductionStatus(
             nextArrivedQty,
-            track.orderedQty,
+            track.actualOrderQty || track.orderedQty,
             track.productionStatus,
           ),
-          orderStatus: deriveOrderStatus(nextArrivedQty, track.orderedQty),
+          orderStatus: deriveOrderStatus(
+            nextArrivedQty,
+            track.actualOrderQty || track.orderedQty,
+          ),
           note: dto.note ?? track.note,
         },
       });
@@ -976,8 +1112,12 @@ export class OperationsService {
     if (!request) {
       throw new NotFoundException('Stocking request not found');
     }
-    if (request.status === StockingRequestStatus.CANCELLED) {
-      throw new BadRequestException('Cancelled stocking requests cannot be allocated');
+    if (
+      request.status === StockingRequestStatus.CANCELLED ||
+      request.status === StockingRequestStatus.SHORT_CLOSED ||
+      request.status === StockingRequestStatus.COMPLETED
+    ) {
+      throw new BadRequestException('Closed stocking requests cannot be allocated');
     }
     if (!dto.allocationTarget.trim()) {
       throw new BadRequestException('Allocation target is required');
@@ -1020,10 +1160,15 @@ export class OperationsService {
       });
 
       if (remainingAllocatableQty - dto.allocatedQty === 0) {
+        const nextStatus =
+          roundLaunchQty >= request.targetFinishedQty
+            ? StockingRequestStatus.COMPLETED
+            : StockingRequestStatus.TARGET_SHORTFALL_ALLOCATED;
+
         await tx.stockingRequest.update({
           where: { id: request.id },
           data: {
-            status: StockingRequestStatus.ALLOCATED,
+            status: nextStatus,
           },
         });
       }
@@ -1034,6 +1179,66 @@ export class OperationsService {
     await this.recalculateNow();
 
     return allocation;
+  }
+
+  async terminateStockingRequest(
+    id: string,
+    dto: TerminateStockingRequestDto,
+    currentUser: { id: string; role: UserRole },
+  ) {
+    if (currentUser.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Current user cannot terminate stocking requests');
+    }
+    if (!dto.reason.trim()) {
+      throw new BadRequestException('终止本轮备货必须填写原因');
+    }
+
+    const request = await this.prisma.stockingRequest.findUnique({
+      where: { id },
+      include: {
+        launchAllocations: true,
+        productionBatches: {
+          include: {
+            actual: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Stocking request not found');
+    }
+    if (
+      request.status === StockingRequestStatus.CANCELLED ||
+      request.status === StockingRequestStatus.SHORT_CLOSED ||
+      request.status === StockingRequestStatus.COMPLETED
+    ) {
+      throw new BadRequestException('该备货任务已关闭');
+    }
+
+    const roundLaunchQty = request.productionBatches.reduce(
+      (sum, batch) =>
+        batch.batchStatus === ProductionBatchStatus.COMPLETED
+          ? sum + (batch.actual?.actualLaunchQty ?? 0)
+          : sum,
+      0,
+    );
+    if (roundLaunchQty >= request.targetFinishedQty) {
+      throw new BadRequestException('目标已达成的备货任务不应短缺完结');
+    }
+
+    const updated = await this.prisma.stockingRequest.update({
+      where: { id },
+      data: {
+        status: StockingRequestStatus.SHORT_CLOSED,
+        terminatedReason: dto.reason.trim(),
+        terminatedAt: new Date(),
+      },
+    });
+
+    await this.recalculateNow();
+
+    return updated;
   }
 
   async createBomVersion(dto: CreateBomVersionDto) {
@@ -1379,12 +1584,35 @@ function resolveStockingRequestStatus(
   currentMinKitQty: number,
   minStartQty: number,
   followedMaterialCount: number,
+  roundLaunchQty: number,
+  remainingAllocatableQty: number,
+  targetFinishedQty: number,
 ) {
   if (status === StockingRequestStatus.CANCELLED) {
     return 'CANCELLED';
   }
-  if (status === StockingRequestStatus.ALLOCATED) {
-    return 'ALLOCATED';
+  if (status === StockingRequestStatus.SHORT_CLOSED) {
+    return 'SHORT_CLOSED';
+  }
+  if (status === StockingRequestStatus.COMPLETED) {
+    return 'COMPLETED';
+  }
+  if (status === StockingRequestStatus.TARGET_SHORTFALL_ALLOCATED) {
+    return 'TARGET_SHORTFALL_ALLOCATED';
+  }
+  if (
+    (status === StockingRequestStatus.ALLOCATED ||
+      (roundLaunchQty > 0 && remainingAllocatableQty === 0)) &&
+    roundLaunchQty < targetFinishedQty
+  ) {
+    return 'TARGET_SHORTFALL_ALLOCATED';
+  }
+  if (
+    (status === StockingRequestStatus.ALLOCATED ||
+      (roundLaunchQty > 0 && remainingAllocatableQty === 0)) &&
+    roundLaunchQty >= targetFinishedQty
+  ) {
+    return 'COMPLETED';
   }
   if (generatedBatchCount > 0) {
     return 'BATCH_CREATED';

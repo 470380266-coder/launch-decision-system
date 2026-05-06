@@ -171,6 +171,14 @@ export function createLaunchAllocation(payload: LaunchAllocationPayload, token: 
   return postJson('/operations/launch-allocations', payload, token);
 }
 
+export function terminateStockingRequest(
+  stockingRequestId: string,
+  payload: { reason: string },
+  token: string,
+) {
+  return patchJson(`/operations/stocking-requests/${stockingRequestId}/terminate`, payload, token);
+}
+
 export function createBomVersion(payload: BomVersionPayload, token: string) {
   return postJson('/operations/bom-versions', payload, token);
 }

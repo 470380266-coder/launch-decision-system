@@ -21,6 +21,7 @@ import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
 import { CreateStockingRequestDto } from './dto/create-stocking-request.dto';
+import { TerminateStockingRequestDto } from './dto/terminate-stocking-request.dto';
 import { UpdateBatchActualDto } from './dto/update-batch-actual.dto';
 import { UpdateBatchStatusDto } from './dto/update-batch-status.dto';
 import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
@@ -128,6 +129,20 @@ export class OperationsController {
     @Req() req: Request,
   ) {
     return this.operationsService.createStockingRequest(
+      dto,
+      req.user as { id: string; role: UserRole },
+    );
+  }
+
+  @Patch('stocking-requests/:id/terminate')
+  @Roles(UserRole.ADMIN)
+  terminateStockingRequest(
+    @Param('id') id: string,
+    @Body() dto: TerminateStockingRequestDto,
+    @Req() req: Request,
+  ) {
+    return this.operationsService.terminateStockingRequest(
+      id,
       dto,
       req.user as { id: string; role: UserRole },
     );

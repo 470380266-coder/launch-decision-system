@@ -2659,11 +2659,156 @@ textarea {
 }
 
 .stocking-table {
-  min-width: 980px;
+  min-width: 1280px;
+  table-layout: fixed;
+}
+
+.stocking-table th {
+  white-space: nowrap;
+}
+
+.stocking-table th:nth-child(1),
+.stocking-table td:nth-child(1) {
+  width: 200px;
+}
+
+.stocking-table th:nth-child(2),
+.stocking-table td:nth-child(2) {
+  width: 96px;
+}
+
+.stocking-table th:nth-child(3),
+.stocking-table td:nth-child(3) {
+  width: 190px;
+}
+
+.stocking-table th:nth-child(4),
+.stocking-table td:nth-child(4) {
+  width: 120px;
+}
+
+.stocking-table th:nth-child(5),
+.stocking-table td:nth-child(5) {
+  width: 150px;
+}
+
+.stocking-table th:nth-child(6),
+.stocking-table td:nth-child(6) {
+  width: 80px;
+}
+
+.stocking-table th:nth-child(8),
+.stocking-table td:nth-child(8) {
+  width: 96px;
+}
+
+.stocking-table th:nth-child(9),
+.stocking-table td:nth-child(9) {
+  width: 64px;
+  text-align: center;
+}
+
+.stocking-table .ops-dot-status {
+  white-space: nowrap;
+}
+
+.stocking-table .ops-table-link {
+  white-space: nowrap;
 }
 
 .stocking-detail-table {
-  min-width: 980px;
+  min-width: 1180px;
+}
+
+.stocking-warning {
+  margin: 18px 0 0;
+  padding: 10px 12px;
+  border-radius: 6px;
+  background: rgba(255, 91, 79, 0.08);
+  color: #a42b23;
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.stocking-resolution-card {
+  display: flex;
+  flex-direction: column;
+}
+
+.stocking-resolution-card > .stocking-warning {
+  margin: 24px 24px 0;
+}
+
+.stocking-action-row {
+  margin-top: 12px;
+  justify-content: flex-start;
+}
+
+.stocking-resolution-actions {
+  margin: 16px 24px 24px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.stocking-resolution-actions:has(+ .stocking-restock-form),
+.stocking-resolution-actions:has(+ .stocking-close-form) {
+  margin-bottom: 16px;
+}
+
+.stocking-resolution-actions button {
+  min-width: 112px;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #171717;
+  color: #ffffff;
+  cursor: pointer;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.stocking-resolution-actions button:disabled {
+  background: #f4f4f4;
+  color: #9b9b9b;
+  cursor: not-allowed;
+}
+
+.stocking-restock-form {
+  margin: 0 24px 24px;
+  display: grid;
+  gap: 12px;
+}
+
+.stocking-restock-fields {
+  max-width: 760px;
+  grid-template-columns: minmax(180px, 240px) minmax(260px, 1fr);
+}
+
+.stocking-restock-table {
+  margin-top: 0;
+}
+
+.stocking-restock-table .ops-admin-table {
+  min-width: 820px;
+}
+
+.stocking-close-form {
+  max-width: 760px;
+  margin: 0 24px 24px;
+  grid-template-columns: minmax(260px, 420px) auto;
+  align-items: end;
+}
+
+.stocking-close-form .purchase-arrival-actions {
+  grid-column: auto;
+  justify-content: flex-start;
+}
+
+.stocking-close-form .purchase-arrival-actions button:first-child {
+  background: #fafafa;
+  color: #171717;
 }
 
 .ops-danger-text {
@@ -2697,6 +2842,13 @@ textarea {
 
 .ops-table-link:hover {
   background: #fafafa;
+}
+
+.ops-table-actions {
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 6px;
 }
 
 .ops-list-footer {

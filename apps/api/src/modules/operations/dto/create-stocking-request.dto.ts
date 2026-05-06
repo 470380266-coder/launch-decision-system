@@ -25,4 +25,8 @@ export class CreateStockingRequestDto {
   @IsOptional()
   @IsString()
   remark?: string;
+
+  @IsOptional()
+  @IsString()
+  sourceStockingRequestId?: string;
 }

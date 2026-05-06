@@ -123,8 +123,21 @@ export class RecalculationService {
           0,
         );
         const remainingAllocatableQty = Math.max(roundLaunchQty - allocatedLaunchQty, 0);
+        const targetGapQty = Math.max(
+          currentStockingRequest.targetFinishedQty - roundLaunchQty,
+          0,
+        );
 
         if (roundLaunchQty > 0) {
+          const productState =
+            remainingAllocatableQty > 0
+              ? ProductState.LAUNCHABLE
+              : targetGapQty <= 0
+                ? ProductState.COMPLETED
+                : currentStockingRequest.status === StockingRequestStatus.SHORT_CLOSED
+                  ? ProductState.SHORT_CLOSED
+                  : ProductState.TARGET_SHORTFALL;
+
           await this.writeSnapshot(run.id, product.id, {
             stockingRequestId: currentStockingRequest.id,
             launchableQtyNow: remainingAllocatableQty,
@@ -132,15 +145,16 @@ export class RecalculationService {
             roundLaunchQty,
             allocatedLaunchQty,
             remainingAllocatableQty,
-            productState:
-              remainingAllocatableQty > 0
-                ? ProductState.LAUNCHABLE
-                : ProductState.COMPLETED,
+            productState,
             nextLaunchDate: null,
             reasonSummary:
               remainingAllocatableQty > 0
                 ? `本轮备货 ${currentStockingRequest.requestNo} 剩余可分配上架量 ${remainingAllocatableQty}`
-                : `本轮备货 ${currentStockingRequest.requestNo} 已分配完`,
+                : targetGapQty <= 0
+                  ? `本轮备货 ${currentStockingRequest.requestNo} 目标达成并已分配完`
+                  : currentStockingRequest.status === StockingRequestStatus.SHORT_CLOSED
+                    ? `本轮备货 ${currentStockingRequest.requestNo} 短缺完结，目标缺口 ${targetGapQty}`
+                    : `本轮备货 ${currentStockingRequest.requestNo} 已分配完但目标未达成，目标缺口 ${targetGapQty}`,
           });
           continue;
         }

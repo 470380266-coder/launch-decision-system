@@ -23,6 +23,8 @@ enum ProductState {
   SCHEDULABLE
   BLOCKED
   COMPLETED
+  TARGET_SHORTFALL
+  SHORT_CLOSED
 }
 
 enum ProductionBatchStatus {
@@ -60,6 +62,9 @@ enum ProcurementProductionStatus {
 enum StockingRequestStatus {
   CONFIRMED
   ALLOCATED
+  TARGET_SHORTFALL_ALLOCATED
+  COMPLETED
+  SHORT_CLOSED
   CANCELLED
 }
 
@@ -142,15 +147,20 @@ model StockingRequest {
   bomVersionId        String
   requestNo           String   @unique
   targetFinishedQty   Float
+  sourceStockingRequestId String?
   requestedByUserId   String
   requestedAt         DateTime
   status              StockingRequestStatus @default(CONFIRMED)
   remark              String?
+  terminatedReason    String?
+  terminatedAt        DateTime?
   createdAt           DateTime @default(now())
   updatedAt           DateTime @updatedAt
 
   product             Product @relation(fields: [productId], references: [id])
   bomVersion          BomVersion @relation(fields: [bomVersionId], references: [id])
+  sourceStockingRequest StockingRequest? @relation("StockingRequestRestocks", fields: [sourceStockingRequestId], references: [id])
+  restockRequests     StockingRequest[] @relation("StockingRequestRestocks")
   requestedBy         User @relation(fields: [requestedByUserId], references: [id])
   procurementTracks   MaterialProcurementTrack[]
   productionBatches    ProductionBatch[]
@@ -211,6 +221,9 @@ model MaterialProcurementTrack {
   purchaseOrderNo       String?
   requiredQty           Float
   orderedQty            Float
+  actualOrderQty        Float    @default(0)
+  isPartialPurchase     Boolean  @default(false)
+  partialPurchaseReason String?
   arrivedQty            Float    @default(0)
   orderStatus           ProcurementOrderStatus @default(NOT_ORDERED)
   productionStatus      ProcurementProductionStatus @default(NOT_STARTED)

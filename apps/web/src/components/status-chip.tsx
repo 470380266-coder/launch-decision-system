@@ -5,6 +5,8 @@ const statusMap: Record<ProductState, { label: string; className: string }> = {
   SCHEDULABLE: { label: '可预排', className: 'status-schedulable' },
   BLOCKED: { label: '受阻', className: 'status-blocked' },
   COMPLETED: { label: '已完结', className: 'status-completed' },
+  TARGET_SHORTFALL: { label: '目标未达成', className: 'status-blocked' },
+  SHORT_CLOSED: { label: '短缺完结', className: 'status-blocked' },
 };
 
 export function StatusChip({
