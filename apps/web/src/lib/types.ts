@@ -1,4 +1,4 @@
-export type ProductState = 'LAUNCHABLE' | 'SCHEDULABLE' | 'BLOCKED';
+export type ProductState = 'LAUNCHABLE' | 'SCHEDULABLE' | 'BLOCKED' | 'COMPLETED';
 
 export type ProductListItem = {
   id: string;
@@ -10,6 +10,9 @@ export type ProductListItem = {
   status: ProductState;
   launchableQtyNow: number;
   shortTermIncrementQty: number;
+  roundLaunchQty: number;
+  allocatedLaunchQty: number;
+  remainingAllocatableQty: number;
   nextLaunchDate: string | null;
   reasonSummary: string;
 };
@@ -21,6 +24,9 @@ export type ProductDetail = {
   state: ProductState;
   launchableQtyNow: number;
   shortTermIncrementQty: number;
+  roundLaunchQty: number;
+  allocatedLaunchQty: number;
+  remainingAllocatableQty: number;
   nextLaunchDate: string | null;
   reasonSummary: string;
   bom: {
@@ -127,6 +133,62 @@ export type OperationBootstrap = {
       isSharedMaterial: boolean;
     }>;
   }>;
+  stockingRequests: Array<{
+    id: string;
+    requestNo: string;
+    productId: string;
+    productName: string;
+    targetFinishedQty: number;
+    bomVersionId: string;
+    bomVersionNo: string;
+    status:
+      | 'PENDING_FOLLOW_UP'
+      | 'IN_PROGRESS'
+      | 'READY_TO_BATCH'
+      | 'BATCH_CREATED'
+      | 'ALLOCATED'
+      | 'CANCELLED';
+    totalMaterialCount: number;
+    followedMaterialCount: number;
+    arrivedMaterialCount: number;
+    currentMinKitQty: number;
+    minStartQty: number;
+    criticalGap: string;
+    requestedAt: string;
+    generatedBatchCount: number;
+    roundLaunchQty: number;
+    allocatedLaunchQty: number;
+    remainingAllocatableQty: number;
+    launchAllocations: Array<{
+      id: string;
+      allocationTarget: string;
+      allocatedQty: number;
+      allocatedAt: string;
+      allocatedByName: string;
+      note: string | null;
+    }>;
+    tracks: Array<{
+      id: string;
+      materialId: string;
+      materialName: string;
+      materialCode: string;
+      materialUnit: string;
+      requiredQty: number;
+      arrivedQty: number;
+      gapQty: number;
+      orderStatus: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
+      productionStatus:
+        | 'NOT_STARTED'
+        | 'IN_PRODUCTION'
+        | 'READY_TO_SHIP'
+        | 'SHIPPED'
+        | 'ARRIVED';
+      expectedShipAt: string | null;
+      expectedArriveAt: string | null;
+      note: string | null;
+      isSharedMaterial: boolean;
+    }>;
+  }>;
   procurementTracks: Array<{
     id: string;
     productId: string;
@@ -174,6 +236,8 @@ export type OperationBootstrap = {
     batchNo: string;
     productId: string;
     productName: string;
+    stockingRequestId: string | null;
+    stockingRequestNo: string | null;
     status: 'PENDING' | 'PAUSED' | 'COMPLETED';
     plannedQty: number;
     predictedLaunchDate: string | null;
@@ -258,7 +322,9 @@ export type StockingRequestPayload = {
 };
 
 export type ProcurementTrackUpdatePayload = {
+  purchaseOrderNo?: string | null;
   orderedQty?: number;
+  orderedAt?: string | null;
   orderStatus?: 'NOT_ORDERED' | 'ORDERED' | 'PARTIAL' | 'COMPLETED';
   productionStatus?:
     | 'NOT_STARTED'
@@ -284,6 +350,13 @@ export type ProcurementArrivalPayload = {
 export type AllocationPayload = {
   receiptBatchId: string;
   productionBatchId: string;
+  allocatedQty: number;
+  note?: string;
+};
+
+export type LaunchAllocationPayload = {
+  stockingRequestId: string;
+  allocationTarget: string;
   allocatedQty: number;
   note?: string;
 };

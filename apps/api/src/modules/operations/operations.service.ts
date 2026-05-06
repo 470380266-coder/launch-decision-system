@@ -8,6 +8,7 @@ import {
   ProcurementProductionStatus,
   ProductionBatchStatus,
   RunType,
+  StockingRequestStatus,
   UserRole,
 } from '@prisma/client';
 import { RecalculationService } from '../recalculation/recalculation.service';
@@ -15,6 +16,7 @@ import { PrismaService } from '../shared/prisma.service';
 import { ConfirmProcurementArrivalDto } from './dto/confirm-procurement-arrival.dto';
 import { CreateAllocationDto } from './dto/create-allocation.dto';
 import { CreateBomVersionDto } from './dto/create-bom-version.dto';
+import { CreateLaunchAllocationDto } from './dto/create-launch-allocation.dto';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
@@ -38,6 +40,7 @@ export class OperationsService {
       admins,
       activeBoms,
       bomVersions,
+      stockingRequests,
       procurementTracks,
       pendingBatches,
       sharedReceipts,
@@ -91,6 +94,38 @@ export class OperationsService {
             { effectiveFrom: 'desc' },
             { createdAt: 'desc' },
           ],
+        }),
+        this.prisma.stockingRequest.findMany({
+          include: {
+            product: true,
+            bomVersion: true,
+            launchAllocations: {
+              include: {
+                allocatedBy: true,
+              },
+              orderBy: {
+                allocatedAt: 'desc',
+              },
+            },
+            productionBatches: {
+              include: {
+                actual: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
+            procurementTracks: {
+              include: {
+                material: true,
+                bomItem: true,
+              },
+              orderBy: {
+                createdAt: 'asc',
+              },
+            },
+          },
+          orderBy: [{ requestedAt: 'desc' }, { createdAt: 'desc' }],
         }),
         this.prisma.materialProcurementTrack.findMany({
           where:
@@ -152,6 +187,7 @@ export class OperationsService {
                 receiptBatch: true,
               },
             },
+            stockingRequest: true,
           },
           orderBy: [{ predictedLaunchDate: 'asc' }, { createdAt: 'asc' }],
         }),
@@ -242,6 +278,90 @@ export class OperationsService {
           isSharedMaterial: item.isSharedMaterial,
         })),
       })),
+      stockingRequests:
+        user.role === UserRole.ADMIN
+          ? stockingRequests.map((request) => {
+              const relatedBatches = request.productionBatches;
+              const roundLaunchQty = relatedBatches.reduce(
+                (sum, batch) =>
+                  batch.batchStatus === ProductionBatchStatus.COMPLETED
+                    ? sum + (batch.actual?.actualLaunchQty ?? 0)
+                    : sum,
+                0,
+              );
+              const allocatedLaunchQty = request.launchAllocations.reduce(
+                (sum, allocation) => sum + allocation.allocatedQty,
+                0,
+              );
+              const remainingAllocatableQty = Math.max(
+                roundLaunchQty - allocatedLaunchQty,
+                0,
+              );
+              const totalMaterialCount = request.procurementTracks.length;
+              const followedMaterialCount = request.procurementTracks.filter(
+                isProcurementTrackFollowed,
+              ).length;
+              const arrivedMaterialCount = request.procurementTracks.filter(
+                (track) => track.arrivedQty >= track.requiredQty,
+              ).length;
+              const currentMinKitQty = calculateCurrentMinKitQty(
+                request.targetFinishedQty,
+                request.procurementTracks,
+              );
+
+              return {
+                id: request.id,
+                requestNo: request.requestNo,
+                productId: request.productId,
+                productName: request.product.productName,
+                targetFinishedQty: request.targetFinishedQty,
+                bomVersionId: request.bomVersionId,
+                bomVersionNo: request.bomVersion.versionNo,
+                status: resolveStockingRequestStatus(
+                  request.status,
+                  relatedBatches.length,
+                  currentMinKitQty,
+                  request.product.minStartQty,
+                  followedMaterialCount,
+                ),
+                totalMaterialCount,
+                followedMaterialCount,
+                arrivedMaterialCount,
+                currentMinKitQty,
+                minStartQty: request.product.minStartQty,
+                criticalGap: resolveCriticalGap(request.procurementTracks),
+                requestedAt: request.requestedAt,
+                generatedBatchCount: relatedBatches.length,
+                roundLaunchQty,
+                allocatedLaunchQty,
+                remainingAllocatableQty,
+                launchAllocations: request.launchAllocations.map((allocation) => ({
+                  id: allocation.id,
+                  allocationTarget: allocation.allocationTarget,
+                  allocatedQty: allocation.allocatedQty,
+                  allocatedAt: allocation.allocatedAt,
+                  allocatedByName: allocation.allocatedBy.name,
+                  note: allocation.note,
+                })),
+                tracks: request.procurementTracks.map((track) => ({
+                  id: track.id,
+                  materialId: track.materialId,
+                  materialName: track.material.materialName,
+                  materialCode: track.material.materialCode,
+                  materialUnit: track.material.unit,
+                  requiredQty: track.requiredQty,
+                  arrivedQty: track.arrivedQty,
+                  gapQty: Math.max(track.requiredQty - track.arrivedQty, 0),
+                  orderStatus: track.orderStatus,
+                  productionStatus: track.productionStatus,
+                  expectedShipAt: track.expectedShipAt,
+                  expectedArriveAt: track.expectedArriveAt,
+                  note: track.note ?? track.todoNote,
+                  isSharedMaterial: track.bomItem?.isSharedMaterial ?? false,
+                })),
+              };
+            })
+          : [],
       procurementTracks: procurementTracks.map((track) => ({
         id: track.id,
         productId: track.productId,
@@ -343,6 +463,8 @@ export class OperationsService {
           batchNo: batch.batchNo,
           productId: batch.productId,
           productName: batch.product.productName,
+          stockingRequestId: batch.stockingRequestId,
+          stockingRequestNo: batch.stockingRequest?.requestNo ?? null,
           status: batch.batchStatus,
           plannedQty: batch.plannedQty,
           predictedLaunchDate: batch.predictedLaunchDate,
@@ -831,6 +953,89 @@ export class OperationsService {
     return allocation;
   }
 
+  async createLaunchAllocation(
+    dto: CreateLaunchAllocationDto,
+    currentUser: { id: string; role: UserRole },
+  ) {
+    if (currentUser.role !== UserRole.ADMIN) {
+      throw new BadRequestException('Current user cannot allocate launch quantity');
+    }
+
+    const request = await this.prisma.stockingRequest.findUnique({
+      where: { id: dto.stockingRequestId },
+      include: {
+        launchAllocations: true,
+        productionBatches: {
+          include: {
+            actual: true,
+          },
+        },
+      },
+    });
+
+    if (!request) {
+      throw new NotFoundException('Stocking request not found');
+    }
+    if (request.status === StockingRequestStatus.CANCELLED) {
+      throw new BadRequestException('Cancelled stocking requests cannot be allocated');
+    }
+    if (!dto.allocationTarget.trim()) {
+      throw new BadRequestException('Allocation target is required');
+    }
+
+    const roundLaunchQty = request.productionBatches.reduce(
+      (sum, batch) =>
+        batch.batchStatus === ProductionBatchStatus.COMPLETED
+          ? sum + (batch.actual?.actualLaunchQty ?? 0)
+          : sum,
+      0,
+    );
+    const allocatedLaunchQty = request.launchAllocations.reduce(
+      (sum, allocation) => sum + allocation.allocatedQty,
+      0,
+    );
+    const remainingAllocatableQty = Math.max(
+      roundLaunchQty - allocatedLaunchQty,
+      0,
+    );
+
+    if (roundLaunchQty <= 0) {
+      throw new BadRequestException('当前备货任务还没有本轮可上架量');
+    }
+    if (dto.allocatedQty > remainingAllocatableQty) {
+      throw new BadRequestException('分配数量不能超过剩余可分配上架量');
+    }
+
+    const allocation = await this.prisma.$transaction(async (tx) => {
+      const created = await tx.launchAllocation.create({
+        data: {
+          stockingRequestId: request.id,
+          productId: request.productId,
+          allocationTarget: dto.allocationTarget.trim(),
+          allocatedQty: dto.allocatedQty,
+          allocatedByUserId: currentUser.id,
+          allocatedAt: new Date(),
+          note: dto.note,
+        },
+      });
+
+      if (remainingAllocatableQty - dto.allocatedQty === 0) {
+        await tx.stockingRequest.update({
+          where: { id: request.id },
+          data: {
+            status: StockingRequestStatus.ALLOCATED,
+          },
+        });
+      }
+
+      return created;
+    });
+
+    await this.recalculateNow();
+
+    return allocation;
+  }
+
   async createBomVersion(dto: CreateBomVersionDto) {
     const product = await this.prisma.product.findUnique({
       where: { id: dto.productId },
@@ -856,6 +1061,35 @@ export class OperationsService {
 
     if (materials.length !== materialIds.length) {
       throw new BadRequestException('BOM contains unknown or inactive materials');
+    }
+
+    const dedicatedMaterialUsages = await this.prisma.bomItem.findMany({
+      where: {
+        materialId: {
+          in: materialIds,
+        },
+        isSharedMaterial: false,
+        bomVersion: {
+          productId: {
+            not: dto.productId,
+          },
+        },
+      },
+      include: {
+        material: true,
+        bomVersion: {
+          include: {
+            product: true,
+          },
+        },
+      },
+    });
+
+    if (dedicatedMaterialUsages.length > 0) {
+      const usage = dedicatedMaterialUsages[0];
+      throw new BadRequestException(
+        `${usage.material.materialName} 已作为 ${usage.bomVersion.product.productName} 的非共用料，不能复用到其他单品 BOM`,
+      );
     }
 
     const existingBomCount = await this.prisma.bomVersion.count({
@@ -999,14 +1233,46 @@ export class OperationsService {
       actualLaunchQty: dto.actualLaunchQty,
     };
 
-    return this.prisma.productionBatchActual.upsert({
-      where: { productionBatchId: id },
-      create: {
-        productionBatchId: id,
-        ...actualData,
-      },
-      update: actualData,
+    const filledActualFieldCount = [
+      actualData.actualStartAt,
+      actualData.actualFinishAt,
+      actualData.actualLaunchAt,
+      actualData.actualLaunchQty,
+    ].filter((value) => value !== undefined && value !== null).length;
+
+    if (filledActualFieldCount > 0 && filledActualFieldCount < 4) {
+      throw new BadRequestException(
+        '请完整填写实际开工、实际完成、实际上架和实际上架数量后再保存',
+      );
+    }
+
+    const shouldMarkCompleted = filledActualFieldCount === 4;
+
+    const actual = await this.prisma.$transaction(async (tx) => {
+      const actual = await tx.productionBatchActual.upsert({
+        where: { productionBatchId: id },
+        create: {
+          productionBatchId: id,
+          ...actualData,
+        },
+        update: actualData,
+      });
+
+      if (shouldMarkCompleted) {
+        await tx.productionBatch.update({
+          where: { id },
+          data: {
+            batchStatus: ProductionBatchStatus.COMPLETED,
+          },
+        });
+      }
+
+      return actual;
     });
+
+    await this.recalculateNow();
+
+    return actual;
   }
 
   private async recalculateNow() {
@@ -1034,6 +1300,103 @@ function makeStockingRequestNo(date: Date) {
   ].join('');
 
   return `SR-${stamp}-${date.getMilliseconds().toString().padStart(3, '0')}`;
+}
+
+function isProcurementTrackFollowed(track: {
+  orderedQty: number;
+  orderStatus: ProcurementOrderStatus;
+  productionStatus: ProcurementProductionStatus;
+  supplier: string | null;
+  purchaseOrderNo: string | null;
+  expectedShipAt: Date | null;
+  expectedArriveAt: Date | null;
+  todoNote: string | null;
+  nextFollowUpAt: Date | null;
+}) {
+  return (
+    track.orderedQty > 0 ||
+    track.orderStatus !== ProcurementOrderStatus.NOT_ORDERED ||
+    track.productionStatus !== ProcurementProductionStatus.NOT_STARTED ||
+    Boolean(track.supplier) ||
+    Boolean(track.purchaseOrderNo) ||
+    Boolean(track.expectedShipAt) ||
+    Boolean(track.expectedArriveAt) ||
+    Boolean(track.todoNote) ||
+    Boolean(track.nextFollowUpAt)
+  );
+}
+
+function calculateCurrentMinKitQty(
+  targetFinishedQty: number,
+  tracks: Array<{
+    requiredQty: number;
+    arrivedQty: number;
+    bomItem: { unitUsage: number } | null;
+  }>,
+) {
+  if (tracks.length === 0) {
+    return 0;
+  }
+
+  const kitQuantities = tracks.map((track) => {
+    const unitUsage =
+      track.bomItem?.unitUsage ??
+      (targetFinishedQty > 0 ? track.requiredQty / targetFinishedQty : 0);
+
+    return unitUsage > 0 ? Math.floor(track.arrivedQty / unitUsage) : 0;
+  });
+
+  return Math.max(Math.min(...kitQuantities), 0);
+}
+
+function resolveCriticalGap(
+  tracks: Array<{
+    requiredQty: number;
+    arrivedQty: number;
+    material: { materialName: string; unit: string };
+  }>,
+) {
+  const criticalTrack = tracks
+    .map((track) => ({
+      gapQty: Math.max(track.requiredQty - track.arrivedQty, 0),
+      materialName: track.material.materialName,
+      materialUnit: track.material.unit,
+    }))
+    .sort((left, right) => right.gapQty - left.gapQty)[0];
+
+  if (!criticalTrack || criticalTrack.gapQty <= 0) {
+    return '已齐套';
+  }
+
+  return `${criticalTrack.materialName} 缺 ${Number(criticalTrack.gapQty.toFixed(6))} ${
+    criticalTrack.materialUnit
+  }`;
+}
+
+function resolveStockingRequestStatus(
+  status: StockingRequestStatus,
+  generatedBatchCount: number,
+  currentMinKitQty: number,
+  minStartQty: number,
+  followedMaterialCount: number,
+) {
+  if (status === StockingRequestStatus.CANCELLED) {
+    return 'CANCELLED';
+  }
+  if (status === StockingRequestStatus.ALLOCATED) {
+    return 'ALLOCATED';
+  }
+  if (generatedBatchCount > 0) {
+    return 'BATCH_CREATED';
+  }
+  if (currentMinKitQty >= minStartQty) {
+    return 'READY_TO_BATCH';
+  }
+  if (followedMaterialCount === 0) {
+    return 'PENDING_FOLLOW_UP';
+  }
+
+  return 'IN_PROGRESS';
 }
 
 function deriveOrderStatus(

@@ -11,6 +11,9 @@ export const mockProducts: ProductListItem[] = [
     status: 'SCHEDULABLE',
     launchableQtyNow: 0,
     shortTermIncrementQty: 150,
+    roundLaunchQty: 0,
+    allocatedLaunchQty: 0,
+    remainingAllocatableQty: 0,
     nextLaunchDate: '2026-05-05T01:00:00.000Z',
     reasonSummary: '已形成待生产批次 PB-0001，等待生产完成',
   },
@@ -23,6 +26,9 @@ export const mockProductDetail: ProductDetail = {
   state: 'SCHEDULABLE',
   launchableQtyNow: 0,
   shortTermIncrementQty: 150,
+  roundLaunchQty: 0,
+  allocatedLaunchQty: 0,
+  remainingAllocatableQty: 0,
   nextLaunchDate: '2026-05-05T01:00:00.000Z',
   reasonSummary: '已形成待生产批次 PB-0001，等待生产完成',
   bom: {
@@ -177,6 +183,7 @@ export const mockOperations: OperationBootstrap = {
       ],
     },
   ],
+  stockingRequests: [],
   procurementTracks: [
     {
       id: 'track-1',
@@ -218,6 +225,8 @@ export const mockOperations: OperationBootstrap = {
       batchNo: 'PB-0001',
       productId: 'demo-product-1',
       productName: '直播爆品精华水',
+      stockingRequestId: null,
+      stockingRequestNo: null,
       status: 'PENDING',
       plannedQty: 150,
       predictedLaunchDate: '2026-05-05T01:00:00.000Z',

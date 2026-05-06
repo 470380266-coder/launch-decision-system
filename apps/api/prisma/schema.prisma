@@ -22,6 +22,7 @@ enum ProductState {
   LAUNCHABLE
   SCHEDULABLE
   BLOCKED
+  COMPLETED
 }
 
 enum ProductionBatchStatus {
@@ -58,6 +59,7 @@ enum ProcurementProductionStatus {
 
 enum StockingRequestStatus {
   CONFIRMED
+  ALLOCATED
   CANCELLED
 }
 
@@ -75,6 +77,7 @@ model User {
   sharedMaterialAllocations SharedMaterialAllocation[]
   procurementTracks       MaterialProcurementTrack[]
   stockingRequests        StockingRequest[]
+  launchAllocations       LaunchAllocation[]
 }
 
 model Product {
@@ -97,6 +100,7 @@ model Product {
   snapshots                ProductSnapshot[]
   procurementTracks        MaterialProcurementTrack[]
   stockingRequests         StockingRequest[]
+  launchAllocations        LaunchAllocation[]
 }
 
 model Material {
@@ -149,6 +153,9 @@ model StockingRequest {
   bomVersion          BomVersion @relation(fields: [bomVersionId], references: [id])
   requestedBy         User @relation(fields: [requestedByUserId], references: [id])
   procurementTracks   MaterialProcurementTrack[]
+  productionBatches    ProductionBatch[]
+  launchAllocations    LaunchAllocation[]
+  snapshots            ProductSnapshot[]
 }
 
 model BomItem {
@@ -262,6 +269,7 @@ model ProductionBatch {
   id                   String   @id @default(cuid())
   productId            String
   bomVersionId         String
+  stockingRequestId    String?
   batchNo              String
   plannedQty           Int
   batchStatus          ProductionBatchStatus
@@ -275,6 +283,7 @@ model ProductionBatch {
 
   product              Product @relation(fields: [productId], references: [id])
   bomVersion           BomVersion @relation(fields: [bomVersionId], references: [id])
+  stockingRequest      StockingRequest? @relation(fields: [stockingRequestId], references: [id])
   generatedByRun       CalcRun? @relation(fields: [generatedByRunId], references: [id])
   sharedAllocations    SharedMaterialAllocation[]
   actual               ProductionBatchActual?
@@ -300,8 +309,12 @@ model ProductSnapshot {
   id                        String   @id @default(cuid())
   productId                 String
   calcRunId                 String
+  stockingRequestId         String?
   launchableQtyNow          Int
   launchableQtyShortTerm    Int
+  roundLaunchQty            Int      @default(0)
+  allocatedLaunchQty        Int      @default(0)
+  remainingAllocatableQty   Int      @default(0)
   nextLaunchDate            DateTime?
   productState              ProductState
   reasonSummary             String
@@ -309,6 +322,7 @@ model ProductSnapshot {
 
   product                   Product @relation(fields: [productId], references: [id])
   calcRun                   CalcRun @relation(fields: [calcRunId], references: [id])
+  stockingRequest           StockingRequest? @relation(fields: [stockingRequestId], references: [id])
 }
 
 model ProductionBatchActual {
@@ -322,6 +336,23 @@ model ProductionBatchActual {
   updatedAt         DateTime @updatedAt
 
   productionBatch   ProductionBatch @relation(fields: [productionBatchId], references: [id])
+}
+
+model LaunchAllocation {
+  id                  String   @id @default(cuid())
+  stockingRequestId   String
+  productId           String
+  allocationTarget    String
+  allocatedQty        Int
+  allocatedByUserId   String
+  allocatedAt         DateTime
+  note                String?
+  createdAt           DateTime @default(now())
+  updatedAt           DateTime @updatedAt
+
+  stockingRequest     StockingRequest @relation(fields: [stockingRequestId], references: [id])
+  product             Product @relation(fields: [productId], references: [id])
+  allocatedBy         User @relation(fields: [allocatedByUserId], references: [id])
 }
 
 model CalcRun {

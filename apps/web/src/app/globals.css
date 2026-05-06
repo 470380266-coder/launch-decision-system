@@ -582,6 +582,14 @@ textarea {
   box-shadow: 0 0 0 4px rgba(255, 91, 79, 0.14);
 }
 
+.status-chip-plain.status-completed {
+  color: #52525b;
+}
+
+.status-chip-plain.status-completed::before {
+  box-shadow: 0 0 0 4px rgba(82, 82, 91, 0.14);
+}
+
 .home-mobile-list {
   display: none;
 }
@@ -1211,6 +1219,11 @@ textarea {
   color: var(--blocked);
 }
 
+.status-completed {
+  background: rgba(82, 82, 91, 0.12);
+  color: #52525b;
+}
+
 .product-table {
   width: 100%;
   border-collapse: collapse;
@@ -1558,7 +1571,7 @@ textarea {
 
 .purchase-table {
   width: 100%;
-  min-width: 1180px;
+  min-width: 920px;
   border-collapse: collapse;
   color: #171717;
   font-size: 14px;
@@ -1809,6 +1822,13 @@ textarea {
   font-size: 12px;
 }
 
+.purchase-inbound-head button.purchase-inbound-primary {
+  height: 32px;
+  padding: 0 16px;
+  background: #171717;
+  color: #ffffff;
+}
+
 .purchase-inbound-table-wrap {
   overflow-x: auto;
   border: 1px solid #ebebeb;
@@ -1843,6 +1863,32 @@ textarea {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   gap: 12px;
+}
+
+.purchase-arrival-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.purchase-arrival-actions button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  height: 32px;
+  padding: 0 14px;
+  border: 0;
+  border-radius: 999px;
+  background: #fafafa;
+  color: #171717;
+  font-size: 14px;
+  font-weight: 500;
+}
+
+.purchase-arrival-actions button:last-child {
+  background: #171717;
+  color: #ffffff;
 }
 
 .purchase-edit-actions {
@@ -2366,7 +2412,9 @@ textarea {
 }
 
 .admin-batch-workspace,
-.admin-product-workspace {
+.admin-product-workspace,
+.admin-stocking-workspace,
+.stocking-detail-view {
   display: grid;
   gap: 16px;
 }
@@ -2601,6 +2649,21 @@ textarea {
   border-radius: 999px;
   background: currentColor;
   box-shadow: 0 0 0 4px rgba(23, 23, 23, 0.1);
+}
+
+.ops-dot-status.status-launchable,
+.ops-dot-status.status-schedulable,
+.ops-dot-status.status-blocked {
+  padding: 3px 8px;
+  border-radius: 999px;
+}
+
+.stocking-table {
+  min-width: 980px;
+}
+
+.stocking-detail-table {
+  min-width: 980px;
 }
 
 .ops-danger-text {

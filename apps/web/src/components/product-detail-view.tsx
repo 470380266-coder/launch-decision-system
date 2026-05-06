@@ -42,6 +42,10 @@ function displayState(state: string) {
     return '可排序';
   }
 
+  if (state === 'COMPLETED') {
+    return '已完结';
+  }
+
   return '受阻';
 }
 
@@ -106,12 +110,16 @@ export function ProductDetailView({ detail }: { detail: ProductDetail }) {
 
       <section className="detail-kpi-grid">
         <div className="detail-kpi-card">
-          <div className="detail-kpi-label">当前已可上架数量</div>
-          <div className="detail-kpi-value">{detail.launchableQtyNow}</div>
+          <div className="detail-kpi-label">本轮可上架量</div>
+          <div className="detail-kpi-value">{detail.roundLaunchQty}</div>
         </div>
         <div className="detail-kpi-card">
-          <div className="detail-kpi-label">短期新增可上架量</div>
-          <div className="detail-kpi-value">{detail.shortTermIncrementQty}</div>
+          <div className="detail-kpi-label">已分配上架量</div>
+          <div className="detail-kpi-value">{detail.allocatedLaunchQty}</div>
+        </div>
+        <div className="detail-kpi-card">
+          <div className="detail-kpi-label">剩余可分配上架量</div>
+          <div className="detail-kpi-value">{detail.remainingAllocatableQty}</div>
         </div>
         <div className="detail-kpi-card">
           <div className="detail-kpi-label">下一批预计上架时间</div>

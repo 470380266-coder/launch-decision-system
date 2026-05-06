@@ -3,6 +3,7 @@
 import Link from 'next/link';
 import { useEffect, useState } from 'react';
 import { getCurrentUser } from '@/lib/api';
+import { rolePageTitle, roleTitleLabel } from '@/lib/role-display';
 import { AuthUser } from '@/lib/types';
 
 const TOKEN_KEY = 'launch-decision-token';
@@ -33,8 +34,15 @@ export function HomeActions() {
     })();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      document.title = rolePageTitle(user.role);
+    }
+  }, [user]);
+
   function logout() {
     window.localStorage.removeItem(TOKEN_KEY);
+    document.title = '上架决策系统 V1';
     window.location.reload();
   }
 
@@ -79,15 +87,7 @@ export function HomeActions() {
 }
 
 function roleLabel(role: AuthUser['role']) {
-  if (role === 'ADMIN') {
-    return '管理员';
-  }
-
-  if (role === 'PURCHASER') {
-    return '采购员';
-  }
-
-  return '运营';
+  return roleTitleLabel(role);
 }
 
 function displayUsername(username: string) {

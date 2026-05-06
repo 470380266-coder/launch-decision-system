@@ -7,6 +7,7 @@ import {
   confirmProcurementArrival,
   createAllocation,
   createBomVersion,
+  createLaunchAllocation,
   createMaterial,
   createProduct,
   createStockingRequest,
@@ -16,6 +17,7 @@ import {
   updateBatchStatus,
   updateProcurementTrack,
 } from '@/lib/api';
+import { rolePageTitle, roleTitleLabel } from '@/lib/role-display';
 import { AuthUser, OperationBootstrap } from '@/lib/types';
 import { PageTransition } from '@/components/page-transition';
 import { FormField, Modal, inputCls, selectCls } from '@/components/modal';
@@ -63,13 +65,7 @@ function formatDemandQty(value: number) {
 }
 
 function roleName(role: AuthUser['role']) {
-  if (role === 'ADMIN') {
-    return '管理员';
-  }
-  if (role === 'PURCHASER') {
-    return '采购员';
-  }
-  return '运营';
+  return roleTitleLabel(role);
 }
 
 function roleViewLabel(role: AuthUser['role']) {
@@ -146,6 +142,31 @@ function purchaseDeltaText(track: OperationBootstrap['procurementTracks'][number
   return `提前 ${Math.abs(diffDays)} 天`;
 }
 
+function transitDaysText({
+  actualArriveAt,
+  expectedArriveAt,
+  inTransitAt,
+}: {
+  actualArriveAt?: string | null;
+  expectedArriveAt: string;
+  inTransitAt: string;
+}) {
+  if (!inTransitAt) {
+    return '待确认';
+  }
+
+  const arriveAt = actualArriveAt || expectedArriveAt;
+  if (!arriveAt) {
+    return '待确认';
+  }
+
+  const shipTime = new Date(inTransitAt).getTime();
+  const arriveTime = new Date(arriveAt).getTime();
+  const diffDays = Math.max(Math.ceil((arriveTime - shipTime) / 86_400_000), 0);
+
+  return `${actualArriveAt ? '实际' : '预计'} ${diffDays} 天`;
+}
+
 function shortDate(input: string | null) {
   if (!input) {
     return '待确认';
@@ -213,6 +234,12 @@ export function OperationsConsole({
     })();
   }, []);
 
+  useEffect(() => {
+    if (user) {
+      document.title = rolePageTitle(user.role);
+    }
+  }, [user]);
+
   async function refreshData() {
     if (!token) {
       throw new Error('Missing auth token');
@@ -222,6 +249,7 @@ export function OperationsConsole({
 
   function logout() {
     window.localStorage.removeItem(TOKEN_KEY);
+    document.title = '上架决策系统 V1';
     window.location.href = '/login';
   }
 
@@ -430,9 +458,11 @@ function ProcurementWorkspace({
 }: WorkspaceProps) {
   const [editTrackId, setEditTrackId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState({
+    purchaseOrderNo: '',
     orderedQty: 0,
     orderStatus: 'ORDERED',
     productionStatus: 'IN_PRODUCTION',
+    orderedAt: '',
     expectedShipAt: '',
     inTransitAt: '',
     expectedArriveAt: '',
@@ -456,9 +486,11 @@ function ProcurementWorkspace({
     setEditTrackId(track.id);
     setArrivalTrackId(track.id);
     setEditForm({
+      purchaseOrderNo: track.purchaseOrderNo ?? '',
       orderedQty: track.orderedQty,
       orderStatus: track.orderStatus,
       productionStatus: track.productionStatus,
+      orderedAt: toDateTimeLocal(track.orderedAt),
       expectedShipAt: toDateTimeLocal(track.expectedShipAt),
       inTransitAt: toDateTimeLocal(track.inTransitAt),
       expectedArriveAt: toDateTimeLocal(track.expectedArriveAt),
@@ -487,7 +519,9 @@ function ProcurementWorkspace({
         await updateProcurementTrack(
           editTrackId,
           {
+            purchaseOrderNo: editForm.purchaseOrderNo || null,
             orderedQty: Number(editForm.orderedQty),
+            orderedAt: editForm.orderedAt || null,
             orderStatus: editForm.orderStatus as never,
             productionStatus: editForm.productionStatus as never,
             expectedShipAt: editForm.expectedShipAt || null,
@@ -626,7 +660,7 @@ function ProcurementWorkspace({
                 <span aria-hidden="true">⌕</span>
                 <input
                   onChange={(event) => setSearch(event.target.value)}
-                  placeholder="单品 / 子物料 / 供应商 / 采购单号"
+                placeholder="单品 / 子物料 / 供应商 / 外部采购单号"
                   value={search}
                 />
               </label>
@@ -661,14 +695,11 @@ function ProcurementWorkspace({
               <thead>
                 <tr>
                   <th>单品 / 子物料</th>
-                  <th>供应商 / 采购单</th>
+                  <th>供应商 / 外部采购单</th>
                   <th>数量</th>
                   <th>状态</th>
-                  <th>下单时间</th>
                   <th>预计到货</th>
-                  <th>实际到货</th>
                   <th>差值</th>
-                  <th>关联编号</th>
                   <th>操作</th>
                 </tr>
               </thead>
@@ -686,9 +717,9 @@ function ProcurementWorkspace({
                         <td>
                           <strong>{track.supplier ?? track.purchaserName}</strong>
                           <div>
-                            {track.purchaseOrderNo ??
-                              track.receiptBatchNo ??
-                              `PO-${track.materialCode}`}
+                            {track.purchaseOrderNo ?? '待填写'}
+                            {' · '}
+                            {track.stockingRequestNo ?? track.receiptBatchNo ?? '未关联'}
                           </div>
                         </td>
                         <td>
@@ -708,9 +739,10 @@ function ProcurementWorkspace({
                             {statusLabel}
                           </span>
                         </td>
-                        <td>{formatDate(track.orderedAt ?? track.expectedShipAt)}</td>
-                        <td>{formatDate(track.expectedArriveAt)}</td>
-                        <td>{shortDate(track.actualArriveAt)}</td>
+                        <td>
+                          <strong>{formatDate(track.expectedArriveAt)}</strong>
+                          <div>实际 {shortDate(track.actualArriveAt)}</div>
+                        </td>
                         <td
                           className={
                             delta.startsWith('延期')
@@ -722,7 +754,6 @@ function ProcurementWorkspace({
                         >
                           {delta}
                         </td>
-                        <td>{track.stockingRequestNo ?? track.receiptBatchNo ?? '-'}</td>
                         <td>
                           <button onClick={() => openEdit(track)} type="button">
                             编辑
@@ -733,7 +764,7 @@ function ProcurementWorkspace({
                   })
                 ) : (
                   <tr>
-                    <td className="purchase-empty" colSpan={10}>
+                    <td className="purchase-empty" colSpan={7}>
                       当前筛选下暂无采购跟进记录。
                     </td>
                   </tr>
@@ -765,9 +796,11 @@ function PurchaseEditView({
     note: string;
   };
   editForm: {
+    purchaseOrderNo: string;
     orderedQty: number;
     orderStatus: string;
     productionStatus: string;
+    orderedAt: string;
     expectedShipAt: string;
     inTransitAt: string;
     expectedArriveAt: string;
@@ -788,9 +821,11 @@ function PurchaseEditView({
   onConfirmArrival: (event: React.FormEvent<HTMLFormElement>) => void;
   onEditChange: React.Dispatch<
     React.SetStateAction<{
+      purchaseOrderNo: string;
       orderedQty: number;
       orderStatus: string;
       productionStatus: string;
+      orderedAt: string;
       expectedShipAt: string;
       inTransitAt: string;
       expectedArriveAt: string;
@@ -802,6 +837,7 @@ function PurchaseEditView({
   onSave: (event: React.FormEvent<HTMLFormElement>) => void;
   track: OperationBootstrap['procurementTracks'][number];
 }) {
+  const [showArrivalForm, setShowArrivalForm] = useState(false);
   const inboundRows =
     track.arrivedQty > 0
       ? [
@@ -839,7 +875,8 @@ function PurchaseEditView({
         <div>
           <h2>编辑采购进度：{track.materialName}</h2>
           <p>
-            {track.materialCode} · {track.supplier ?? track.purchaserName} · {track.productName}
+            {track.materialCode} · {track.supplier ?? track.purchaserName} · {track.productName} ·
+            需求数量 {formatDemandQty(track.requiredQty)} {track.materialUnit ?? 'pcs'}
           </p>
         </div>
 
@@ -847,18 +884,32 @@ function PurchaseEditView({
           <PurchaseField label="供应商">
             <input disabled value={track.supplier ?? track.purchaserName} />
           </PurchaseField>
-          <PurchaseField label="采购单号">
+          <PurchaseField label="外部采购单号" hint="填写 ERP / 表格 / 外部系统单号">
             <input
-              disabled
-              value={track.purchaseOrderNo ?? track.receiptBatchNo ?? `PO-${track.materialCode}`}
+              placeholder="待填写"
+              value={editForm.purchaseOrderNo}
+              onChange={(event) =>
+                onEditChange((current) => ({
+                  ...current,
+                  purchaseOrderNo: event.target.value,
+                }))
+              }
             />
           </PurchaseField>
           <PurchaseField label="下单状态" hint="已有入库记录,按累计入库数量自动判断">
             <select
               value={editForm.orderStatus}
-              onChange={(event) =>
-                onEditChange((current) => ({ ...current, orderStatus: event.target.value }))
-              }
+              onChange={(event) => {
+                const nextStatus = event.target.value;
+                onEditChange((current) => ({
+                  ...current,
+                  orderStatus: nextStatus,
+                  orderedAt:
+                    nextStatus === 'ORDERED' && !current.orderedAt
+                      ? new Date().toISOString().slice(0, 16)
+                      : current.orderedAt,
+                }));
+              }}
             >
               <option value="NOT_ORDERED">待下单</option>
               <option value="ORDERED">已下单</option>
@@ -899,7 +950,13 @@ function PurchaseEditView({
             />
           </PurchaseField>
           <PurchaseField label="下单时间">
-            <input disabled value={formatDate(track.orderedAt ?? track.expectedShipAt)} />
+            <input
+              type="datetime-local"
+              value={editForm.orderedAt}
+              onChange={(event) =>
+                onEditChange((current) => ({ ...current, orderedAt: event.target.value }))
+              }
+            />
           </PurchaseField>
           <PurchaseField label="预计发货">
             <input
@@ -913,7 +970,7 @@ function PurchaseEditView({
               }
             />
           </PurchaseField>
-          <PurchaseField label="在途时间">
+          <PurchaseField label="发货时间">
             <input
               type="datetime-local"
               value={editForm.inTransitAt}
@@ -924,7 +981,14 @@ function PurchaseEditView({
           </PurchaseField>
 
           <PurchaseField label="在途天数">
-            <input disabled value={track.inTransitAt && track.expectedArriveAt ? '2' : '待确认'} />
+            <input
+              disabled
+              value={transitDaysText({
+                actualArriveAt: track.actualArriveAt,
+                expectedArriveAt: editForm.expectedArriveAt,
+                inTransitAt: editForm.inTransitAt,
+              })}
+            />
           </PurchaseField>
           <PurchaseField label="预计到货">
             <input
@@ -982,14 +1046,10 @@ function PurchaseEditView({
           <div>
             <span>累计入库 {track.arrivedQty} pcs</span>
             <button
-              onClick={() =>
-                onArrivalChange((current) => ({ ...current, arrivedQty: remainingQty }))
-              }
+              className="purchase-inbound-primary"
+              onClick={() => setShowArrivalForm(true)}
               type="button"
             >
-              全部入库
-            </button>
-            <button disabled={isPending} form="purchase-arrival-form" type="submit">
               到货入库
             </button>
           </div>
@@ -1028,58 +1088,76 @@ function PurchaseEditView({
           </table>
         </div>
 
-        <form
-          className="purchase-arrival-form"
-          id="purchase-arrival-form"
-          onSubmit={onConfirmArrival}
-        >
-          <PurchaseField label="到货批次号">
-            <input
-              required
-              value={arrivalForm.receiptBatchNo}
-              onChange={(event) =>
-                onArrivalChange((current) => ({
-                  ...current,
-                  receiptBatchNo: event.target.value,
-                }))
-              }
-            />
-          </PurchaseField>
-          <PurchaseField label="到货数量">
-            <input
-              min={0.000001}
-              step="any"
-              type="number"
-              value={arrivalForm.arrivedQty}
-              onChange={(event) =>
-                onArrivalChange((current) => ({
-                  ...current,
-                  arrivedQty: Number(event.target.value),
-                }))
-              }
-            />
-          </PurchaseField>
-          <PurchaseField label="到货时间">
-            <input
-              type="datetime-local"
-              value={arrivalForm.arrivedAt}
-              onChange={(event) =>
-                onArrivalChange((current) => ({
-                  ...current,
-                  arrivedAt: event.target.value,
-                }))
-              }
-            />
-          </PurchaseField>
-          <PurchaseField label="备注">
-            <input
-              value={arrivalForm.note}
-              onChange={(event) =>
-                onArrivalChange((current) => ({ ...current, note: event.target.value }))
-              }
-            />
-          </PurchaseField>
-        </form>
+        {showArrivalForm ? (
+          <form
+            className="purchase-arrival-form"
+            id="purchase-arrival-form"
+            onSubmit={onConfirmArrival}
+          >
+            <PurchaseField label="到货批次号">
+              <input
+                required
+                value={arrivalForm.receiptBatchNo}
+                onChange={(event) =>
+                  onArrivalChange((current) => ({
+                    ...current,
+                    receiptBatchNo: event.target.value,
+                  }))
+                }
+              />
+            </PurchaseField>
+            <PurchaseField label="到货数量">
+              <input
+                min={0.000001}
+                step="any"
+                type="number"
+                value={arrivalForm.arrivedQty}
+                onChange={(event) =>
+                  onArrivalChange((current) => ({
+                    ...current,
+                    arrivedQty: Number(event.target.value),
+                  }))
+                }
+              />
+            </PurchaseField>
+            <PurchaseField label="到货时间">
+              <input
+                type="datetime-local"
+                value={arrivalForm.arrivedAt}
+                onChange={(event) =>
+                  onArrivalChange((current) => ({
+                    ...current,
+                    arrivedAt: event.target.value,
+                  }))
+                }
+              />
+            </PurchaseField>
+            <PurchaseField label="备注">
+              <input
+                value={arrivalForm.note}
+                onChange={(event) =>
+                  onArrivalChange((current) => ({ ...current, note: event.target.value }))
+                }
+              />
+            </PurchaseField>
+            <div className="purchase-arrival-actions">
+              <button
+                onClick={() =>
+                  onArrivalChange((current) => ({ ...current, arrivedQty: remainingQty }))
+                }
+                type="button"
+              >
+                全部入库
+              </button>
+              <button onClick={() => setShowArrivalForm(false)} type="button">
+                取消入库
+              </button>
+              <button disabled={isPending} type="submit">
+                保存入库
+              </button>
+            </div>
+          </form>
+        ) : null}
       </section>
 
       <div className="purchase-edit-actions">
@@ -1113,11 +1191,18 @@ function PurchaseField({
 }
 
 function AdminWorkspace(props: WorkspaceProps) {
-  const [activeTab, setActiveTab] = useState<'batches' | 'products'>('batches');
+  const [activeTab, setActiveTab] = useState<'stocking' | 'batches' | 'products'>('stocking');
 
   return (
     <div className="admin-workspace">
       <div className="admin-tabs">
+        <button
+          className={activeTab === 'stocking' ? 'active' : ''}
+          onClick={() => setActiveTab('stocking')}
+          type="button"
+        >
+          备货需求
+        </button>
         <button
           className={activeTab === 'batches' ? 'active' : ''}
           onClick={() => setActiveTab('batches')}
@@ -1134,8 +1219,418 @@ function AdminWorkspace(props: WorkspaceProps) {
         </button>
       </div>
       <PageTransition k={activeTab}>
-        {activeTab === 'batches' ? <BatchWorkspace {...props} /> : <ProductWorkspace {...props} />}
+        {activeTab === 'stocking' ? (
+          <StockingRequestWorkspace {...props} />
+        ) : activeTab === 'batches' ? (
+          <BatchWorkspace {...props} />
+        ) : (
+          <ProductWorkspace {...props} />
+        )}
       </PageTransition>
+    </div>
+  );
+}
+
+type StockingRequestRecord = OperationBootstrap['stockingRequests'][number];
+
+const stockingStatusLabels: Record<StockingRequestRecord['status'], string> = {
+  PENDING_FOLLOW_UP: '待跟进',
+  IN_PROGRESS: '备货中',
+  READY_TO_BATCH: '已达开工门槛',
+  BATCH_CREATED: '已生成批次',
+  ALLOCATED: '已分配完',
+  CANCELLED: '已取消',
+};
+
+function stockingStatusClass(status: StockingRequestRecord['status']) {
+  if (status === 'BATCH_CREATED' || status === 'READY_TO_BATCH') {
+    return 'status-launchable';
+  }
+  if (status === 'CANCELLED' || status === 'ALLOCATED') {
+    return 'status-blocked';
+  }
+
+  return 'status-schedulable';
+}
+
+function StockingRequestWorkspace({
+  data,
+  isPending,
+  onError,
+  onMessage,
+  onRefresh,
+  token,
+}: WorkspaceProps) {
+  const [selectedRequestId, setSelectedRequestId] = useState<string | null>(null);
+  const selectedRequest = selectedRequestId
+    ? data.stockingRequests.find((request) => request.id === selectedRequestId)
+    : null;
+
+  if (selectedRequest) {
+    return (
+      <PageTransition k={`stocking-${selectedRequest.id}`}>
+        <StockingRequestDetail
+          isPending={isPending}
+          onBack={() => setSelectedRequestId(null)}
+          onError={onError}
+          onMessage={onMessage}
+          onRefresh={onRefresh}
+          request={selectedRequest}
+          token={token}
+        />
+      </PageTransition>
+    );
+  }
+
+  return (
+    <PageTransition k="stocking-list">
+      <div className="admin-stocking-workspace">
+        <section className="ops-list-card">
+          <div className="ops-list-header">
+            <div className="ops-list-title">
+              <h2>备货需求</h2>
+              <p>查看管理员已发起的备货需求和子料跟进进度。</p>
+            </div>
+          </div>
+
+          <div className="ops-table-scroll">
+            <table className="ops-admin-table stocking-table">
+              <thead>
+                <tr>
+                  <th>单品名称</th>
+                  <th>目标备货数量</th>
+                  <th>当前状态</th>
+                  <th>子料进度</th>
+                  <th>本轮上架分配</th>
+                  <th>关键缺口</th>
+                  <th>发起时间</th>
+                  <th>操作</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.stockingRequests.length ? (
+                  data.stockingRequests.map((request) => (
+                    <tr key={request.id}>
+                      <td>
+                        <strong>{request.productName}</strong>
+                        <div>{request.requestNo}</div>
+                      </td>
+                      <td>{formatDemandQty(request.targetFinishedQty)}</td>
+                      <td>
+                        <span
+                          className={`ops-dot-status ${stockingStatusClass(request.status)}`}
+                        >
+                          <span />
+                          {stockingStatusLabels[request.status]}
+                        </span>
+                      </td>
+                      <td>
+                        <strong>
+                          {request.followedMaterialCount}/{request.totalMaterialCount} 已跟进
+                        </strong>
+                        <div>{request.arrivedMaterialCount} 个子料已到货</div>
+                      </td>
+                      <td>
+                        <strong>余 {formatDemandQty(request.remainingAllocatableQty)}</strong>
+                        <div>
+                          本轮 {formatDemandQty(request.roundLaunchQty)} / 已分配{' '}
+                          {formatDemandQty(request.allocatedLaunchQty)}
+                        </div>
+                      </td>
+                      <td>{request.criticalGap}</td>
+                      <td>{formatDate(request.requestedAt)}</td>
+                      <td>
+                        <button
+                          className="ops-table-link"
+                          onClick={() => setSelectedRequestId(request.id)}
+                          type="button"
+                        >
+                          查看
+                        </button>
+                      </td>
+                    </tr>
+                  ))
+                ) : (
+                  <tr>
+                    <td className="purchase-empty" colSpan={8}>
+                      暂无备货需求。请先在单品管理中发起备货需求。
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+          <div className="ops-list-footer">共 {data.stockingRequests.length} 条记录</div>
+        </section>
+      </div>
+    </PageTransition>
+  );
+}
+
+function StockingRequestDetail({
+  isPending,
+  onBack,
+  onError,
+  onMessage,
+  onRefresh,
+  request,
+  token,
+}: {
+  isPending: boolean;
+  onBack: () => void;
+  onError: (message: string | null) => void;
+  onMessage: (message: string | null) => void;
+  onRefresh: () => Promise<void>;
+  request: StockingRequestRecord;
+  token: string;
+}) {
+  const [isSavingAllocation, startAllocationTransition] = useTransition();
+  const [allocationForm, setAllocationForm] = useState({
+    allocationTarget: '',
+    allocatedQty: '',
+    note: '',
+  });
+  const canAllocate = request.remainingAllocatableQty > 0 && request.status !== 'ALLOCATED';
+
+  function saveLaunchAllocation(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    onMessage(null);
+    onError(null);
+
+    const allocatedQty = Number(allocationForm.allocatedQty);
+    if (!allocationForm.allocationTarget.trim()) {
+      onError('请填写上架分配去向');
+      return;
+    }
+    if (!Number.isInteger(allocatedQty) || allocatedQty <= 0) {
+      onError('请填写大于 0 的整数分配数量');
+      return;
+    }
+    if (allocatedQty > request.remainingAllocatableQty) {
+      onError('分配数量不能超过剩余可分配上架量');
+      return;
+    }
+
+    startAllocationTransition(async () => {
+      try {
+        await createLaunchAllocation(
+          {
+            stockingRequestId: request.id,
+            allocationTarget: allocationForm.allocationTarget,
+            allocatedQty,
+            note: allocationForm.note || undefined,
+          },
+          token,
+        );
+        setAllocationForm({ allocationTarget: '', allocatedQty: '', note: '' });
+        await onRefresh();
+        onMessage('本轮上架分配已保存');
+      } catch (submissionError) {
+        onError(friendlyError(submissionError, '本轮上架分配保存失败'));
+      }
+    });
+  }
+
+  return (
+    <div className="stocking-detail-view">
+      <div className="batch-detail-topline">
+        <button className="batch-back-button" onClick={onBack} type="button">
+          <svg aria-hidden="true" viewBox="0 0 24 24">
+            <path d="m15 18-6-6 6-6" />
+          </svg>
+          返回备货需求
+        </button>
+        <div className="batch-detail-crumb">
+          角色工作台 / 备货需求 / <span>{request.requestNo}</span>
+        </div>
+      </div>
+
+      <section className="batch-detail-card batch-overview-card">
+        <div className="batch-overview-head">
+          <div>
+            <h2>{request.productName}</h2>
+            <p>
+              {request.requestNo} · {request.bomVersionNo}
+            </p>
+          </div>
+          <span className={`ops-dot-status ${stockingStatusClass(request.status)}`}>
+            <span />
+            {stockingStatusLabels[request.status]}
+          </span>
+        </div>
+        <div className="batch-overview-grid">
+          {[
+            ['目标备货数量', formatDemandQty(request.targetFinishedQty)],
+            ['本轮可上架量', formatDemandQty(request.roundLaunchQty)],
+            ['已分配上架量', formatDemandQty(request.allocatedLaunchQty)],
+            ['剩余可分配上架量', formatDemandQty(request.remainingAllocatableQty)],
+            ['当前最小齐套量', formatDemandQty(request.currentMinKitQty)],
+            ['最低开工门槛', request.minStartQty],
+            ['关键缺口', request.criticalGap],
+            ['已生成批次', request.generatedBatchCount],
+          ].map(([label, value]) => (
+            <div key={String(label)}>
+              <span>{label}</span>
+              <strong>{value}</strong>
+            </div>
+          ))}
+        </div>
+      </section>
+
+      <section className="ops-list-card">
+        <div className="ops-list-header">
+          <div className="ops-list-title">
+            <h2>本轮上架分配</h2>
+            <p>记录本轮可上架量被分配到哪里，不计算长期库存。</p>
+          </div>
+        </div>
+        <div className="ops-table-scroll">
+          <table className="ops-admin-table stocking-detail-table">
+            <thead>
+              <tr>
+                <th>分配去向</th>
+                <th>分配数量</th>
+                <th>分配时间</th>
+                <th>操作人</th>
+                <th>备注</th>
+              </tr>
+            </thead>
+            <tbody>
+              {request.launchAllocations.length ? (
+                request.launchAllocations.map((allocation) => (
+                  <tr key={allocation.id}>
+                    <td>{allocation.allocationTarget}</td>
+                    <td>{formatDemandQty(allocation.allocatedQty)}</td>
+                    <td>{formatDate(allocation.allocatedAt)}</td>
+                    <td>{allocation.allocatedByName}</td>
+                    <td>{allocation.note ?? '—'}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td className="purchase-empty" colSpan={5}>
+                    暂无本轮上架分配记录。
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+
+        {canAllocate ? (
+          <form className="purchase-arrival-form" onSubmit={saveLaunchAllocation}>
+            <PurchaseField label="分配去向">
+              <input
+                placeholder="直播场次 / 渠道 / 档期"
+                value={allocationForm.allocationTarget}
+                onChange={(event) =>
+                  setAllocationForm((current) => ({
+                    ...current,
+                    allocationTarget: event.target.value,
+                  }))
+                }
+              />
+            </PurchaseField>
+            <PurchaseField label="分配数量">
+              <input
+                max={request.remainingAllocatableQty}
+                min={1}
+                type="number"
+                value={allocationForm.allocatedQty}
+                onChange={(event) =>
+                  setAllocationForm((current) => ({
+                    ...current,
+                    allocatedQty: event.target.value,
+                  }))
+                }
+              />
+            </PurchaseField>
+            <PurchaseField label="备注">
+              <input
+                value={allocationForm.note}
+                onChange={(event) =>
+                  setAllocationForm((current) => ({ ...current, note: event.target.value }))
+                }
+              />
+            </PurchaseField>
+            <div className="purchase-arrival-actions">
+              <button
+                disabled={isPending || isSavingAllocation}
+                type="button"
+                onClick={() =>
+                  setAllocationForm((current) => ({
+                    ...current,
+                    allocatedQty: String(request.remainingAllocatableQty),
+                  }))
+                }
+              >
+                全部分配
+              </button>
+              <button disabled={isPending || isSavingAllocation} type="submit">
+                保存分配
+              </button>
+            </div>
+          </form>
+        ) : null}
+      </section>
+
+      <section className="ops-list-card">
+        <div className="ops-list-header">
+          <div className="ops-list-title">
+            <h2>子料跟进明细</h2>
+            <p>展示该备货需求自动生成的采购跟进记录。</p>
+          </div>
+        </div>
+        <div className="ops-table-scroll">
+          <table className="ops-admin-table stocking-detail-table">
+            <thead>
+              <tr>
+                <th>子料名称</th>
+                <th>需求数量</th>
+                <th>已到货数量</th>
+                <th>缺口数量</th>
+                <th>跟进状态</th>
+                <th>预计时间</th>
+                <th>跟进备注</th>
+                <th>是否共用料</th>
+              </tr>
+            </thead>
+            <tbody>
+              {request.tracks.map((track) => (
+                <tr key={track.id}>
+                  <td>
+                    <strong>{track.materialName}</strong>
+                    <div>{track.materialCode}</div>
+                  </td>
+                  <td>
+                    {formatDemandQty(track.requiredQty)} {track.materialUnit}
+                  </td>
+                  <td>
+                    {formatDemandQty(track.arrivedQty)} {track.materialUnit}
+                  </td>
+                  <td>
+                    {formatDemandQty(track.gapQty)} {track.materialUnit}
+                  </td>
+                  <td>
+                    <strong>{orderStatusLabels[track.orderStatus]}</strong>
+                    <div>{productionStatusLabels[track.productionStatus]}</div>
+                  </td>
+                  <td>
+                    <strong>{formatDate(track.expectedArriveAt)}</strong>
+                    <div>发货 {formatDate(track.expectedShipAt)}</div>
+                  </td>
+                  <td>{track.note ?? '—'}</td>
+                  <td>
+                    <span className={track.isSharedMaterial ? 'bom-type shared' : 'bom-type'}>
+                      {track.isSharedMaterial ? '共用料' : '非共用料'}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1260,6 +1755,18 @@ function BatchWorkspace({
     onMessage(null);
     onError(null);
 
+    const filledActualFieldCount = [
+      draft.actualStartAt,
+      draft.actualFinishAt,
+      draft.actualLaunchAt,
+      draft.actualLaunchQty,
+    ].filter(Boolean).length;
+
+    if (filledActualFieldCount > 0 && filledActualFieldCount < 4) {
+      onError('请完整填写实际开工、实际完成、实际上架和实际上架数量后再保存');
+      return;
+    }
+
     startTransition(async () => {
       try {
         await updateBatchActual(
@@ -1273,7 +1780,7 @@ function BatchWorkspace({
           token,
         );
         await onRefresh();
-        onMessage('实际结果已回填');
+        onMessage('实际结果已回填，批次已标记为已完成');
       } catch (submissionError) {
         onError(submissionError instanceof Error ? submissionError.message : '实际结果回填失败');
       }
@@ -1783,6 +2290,11 @@ function ProductWorkspace({
   const selectedBomVersions = data.bomVersions.filter(
     (bom) => bom.productId === selectedProductId,
   );
+  const reusableMaterials = getReusableBomMaterials(
+    data.materials,
+    data.bomVersions,
+    selectedProductId,
+  );
   const previewBom =
     selectedBomVersions.find((bom) => bom.id === previewBomVersionId) ??
     selectedBomVersions.find((bom) => bom.isActive);
@@ -1793,10 +2305,16 @@ function ProductWorkspace({
   );
 
   function openBomModal() {
+    const firstReusableMaterialId = reusableMaterials[0]?.id ?? '';
     setBomForm((current) => ({
       ...current,
       productId: selectedProductId,
       activate: selectedBomVersions.length === 0,
+      items: current.items.map((item) =>
+        (item.materialMode ?? 'existing') === 'existing'
+          ? { ...item, materialId: firstReusableMaterialId }
+          : item,
+      ),
     }));
     setShowBomModal(true);
   }
@@ -1829,6 +2347,10 @@ function ProductWorkspace({
         const items = await Promise.all(
           bomForm.items.map(async (item) => {
             if (item.materialMode !== 'new') {
+              if (!item.materialId) {
+                throw new Error('当前没有可复用的已有子料，请新增子料');
+              }
+
               return {
                 materialId: item.materialId,
                 unitUsage: Number(item.unitUsage),
@@ -2216,7 +2738,7 @@ function ProductWorkspace({
       <AddBomModal
         bomForm={bomForm}
         isPending={isPending}
-        materials={data.materials}
+        materials={reusableMaterials}
         onClose={() => setShowBomModal(false)}
         onSave={saveBomVersion}
         open={showBomModal}
@@ -2277,6 +2799,28 @@ type StockingRequestDraft = {
   remark: string;
   selectedBomItemIds: string[];
 };
+
+function getReusableBomMaterials(
+  materials: OperationBootstrap['materials'],
+  bomVersions: OperationBootstrap['bomVersions'],
+  productId: string,
+) {
+  const dedicatedMaterialIds = new Set<string>();
+
+  bomVersions.forEach((bom) => {
+    if (bom.productId === productId) {
+      return;
+    }
+
+    bom.items.forEach((item) => {
+      if (!item.isSharedMaterial) {
+        dedicatedMaterialIds.add(item.materialId);
+      }
+    });
+  });
+
+  return materials.filter((material) => !dedicatedMaterialIds.has(material.id));
+}
 
 function AddProductModal({
   onClose,
@@ -2658,6 +3202,7 @@ function AddBomModal({
             }
             type="button"
             variant="secondary"
+            disabled={materials.length === 0}
           >
             选择已有子料
           </AppButton>
@@ -2804,14 +3349,19 @@ function AddBomModal({
               ) : (
                 <select
                   className={selectCls}
+                  disabled={materials.length === 0}
                   value={item.materialId}
                   onChange={(event) => updateBomItem(index, { materialId: event.target.value })}
                 >
-                  {materials.map((material) => (
-                    <option key={material.id} value={material.id}>
-                      {material.code}・{material.name}・{material.unit}
-                    </option>
-                  ))}
+                  {materials.length ? (
+                    materials.map((material) => (
+                      <option key={material.id} value={material.id}>
+                        {material.code}・{material.name}・{material.unit}
+                      </option>
+                    ))
+                  ) : (
+                    <option value="">无可复用已有子料</option>
+                  )}
                 </select>
               )}
             </div>

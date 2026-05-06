@@ -4,6 +4,7 @@ import {
   BatchActualPayload,
   BatchStatusPayload,
   BomVersionPayload,
+  LaunchAllocationPayload,
   LoginResponse,
   MaterialPayload,
   OperationBootstrap,
@@ -24,7 +25,7 @@ export const API_BASE =
 
 async function safeFetch<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
-    next: { revalidate: 3600 },
+    cache: 'no-store',
   });
 
   if (!response.ok) {
@@ -164,6 +165,10 @@ export function confirmProcurementArrival(
 
 export function createAllocation(payload: AllocationPayload, token: string) {
   return postJson('/operations/allocations', payload, token);
+}
+
+export function createLaunchAllocation(payload: LaunchAllocationPayload, token: string) {
+  return postJson('/operations/launch-allocations', payload, token);
 }
 
 export function createBomVersion(payload: BomVersionPayload, token: string) {

@@ -16,6 +16,7 @@ import { RolesGuard } from '../auth/roles.guard';
 import { ConfirmProcurementArrivalDto } from './dto/confirm-procurement-arrival.dto';
 import { CreateAllocationDto } from './dto/create-allocation.dto';
 import { CreateBomVersionDto } from './dto/create-bom-version.dto';
+import { CreateLaunchAllocationDto } from './dto/create-launch-allocation.dto';
 import { CreateMaterialDto } from './dto/create-material.dto';
 import { CreateProcurementTrackDto } from './dto/create-procurement-track.dto';
 import { CreateReceiptDto } from './dto/create-receipt.dto';
@@ -91,6 +92,18 @@ export class OperationsController {
   @Roles(UserRole.ADMIN)
   createAllocation(@Body() dto: CreateAllocationDto, @Req() req: Request) {
     return this.operationsService.createAllocation(
+      dto,
+      req.user as { id: string; role: UserRole },
+    );
+  }
+
+  @Post('launch-allocations')
+  @Roles(UserRole.ADMIN)
+  createLaunchAllocation(
+    @Body() dto: CreateLaunchAllocationDto,
+    @Req() req: Request,
+  ) {
+    return this.operationsService.createLaunchAllocation(
       dto,
       req.user as { id: string; role: UserRole },
     );

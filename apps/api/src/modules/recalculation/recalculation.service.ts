@@ -5,6 +5,7 @@ import {
   ProductState,
   ProductionBatchStatus,
   RunType,
+  StockingRequestStatus,
 } from '@prisma/client';
 import { PrismaService } from '../shared/prisma.service';
 
@@ -61,8 +62,12 @@ export class RecalculationService {
 
         if (!activeBom) {
           await this.writeSnapshot(run.id, product.id, {
+            stockingRequestId: null,
             launchableQtyNow: 0,
             launchableQtyShortTerm: 0,
+            roundLaunchQty: 0,
+            allocatedLaunchQty: 0,
+            remainingAllocatableQty: 0,
             productState: ProductState.BLOCKED,
             nextLaunchDate: null,
             reasonSummary: '缺少当前生效的 BOM',
@@ -70,8 +75,79 @@ export class RecalculationService {
           continue;
         }
 
+        const currentStockingRequest = await this.prisma.stockingRequest.findFirst({
+          where: {
+            productId: product.id,
+            bomVersionId: activeBom.id,
+            status: {
+              not: StockingRequestStatus.CANCELLED,
+            },
+          },
+          include: {
+            launchAllocations: true,
+            productionBatches: {
+              include: {
+                actual: true,
+              },
+            },
+          },
+          orderBy: {
+            requestedAt: 'desc',
+          },
+        });
+
+        if (!currentStockingRequest) {
+          await this.writeSnapshot(run.id, product.id, {
+            stockingRequestId: null,
+            launchableQtyNow: 0,
+            launchableQtyShortTerm: 0,
+            roundLaunchQty: 0,
+            allocatedLaunchQty: 0,
+            remainingAllocatableQty: 0,
+            productState: ProductState.BLOCKED,
+            nextLaunchDate: null,
+            reasonSummary: '暂无本轮备货任务',
+          });
+          continue;
+        }
+
+        const roundLaunchQty = currentStockingRequest.productionBatches.reduce(
+          (sum, batch) =>
+            batch.batchStatus === ProductionBatchStatus.COMPLETED
+              ? sum + (batch.actual?.actualLaunchQty ?? 0)
+              : sum,
+          0,
+        );
+        const allocatedLaunchQty = currentStockingRequest.launchAllocations.reduce(
+          (sum, allocation) => sum + allocation.allocatedQty,
+          0,
+        );
+        const remainingAllocatableQty = Math.max(roundLaunchQty - allocatedLaunchQty, 0);
+
+        if (roundLaunchQty > 0) {
+          await this.writeSnapshot(run.id, product.id, {
+            stockingRequestId: currentStockingRequest.id,
+            launchableQtyNow: remainingAllocatableQty,
+            launchableQtyShortTerm: 0,
+            roundLaunchQty,
+            allocatedLaunchQty,
+            remainingAllocatableQty,
+            productState:
+              remainingAllocatableQty > 0
+                ? ProductState.LAUNCHABLE
+                : ProductState.COMPLETED,
+            nextLaunchDate: null,
+            reasonSummary:
+              remainingAllocatableQty > 0
+                ? `本轮备货 ${currentStockingRequest.requestNo} 剩余可分配上架量 ${remainingAllocatableQty}`
+                : `本轮备货 ${currentStockingRequest.requestNo} 已分配完`,
+          });
+          continue;
+        }
+
         const batchPlan = await this.calculateCandidateBatchPlan(
           product.id,
+          currentStockingRequest.id,
           product.minStartQty,
           activeBom.items,
         );
@@ -83,8 +159,12 @@ export class RecalculationService {
 
         if (plannedQty < product.minStartQty) {
           await this.writeSnapshot(run.id, product.id, {
+            stockingRequestId: currentStockingRequest.id,
             launchableQtyNow: 0,
             launchableQtyShortTerm: 0,
+            roundLaunchQty,
+            allocatedLaunchQty,
+            remainingAllocatableQty,
             productState: plannedQty > 0 ? ProductState.SCHEDULABLE : ProductState.BLOCKED,
             nextLaunchDate: null,
             reasonSummary:
@@ -107,6 +187,7 @@ export class RecalculationService {
         const batch = await this.ensurePredictedBatch({
           productId: product.id,
           bomVersionId: activeBom.id,
+          stockingRequestId: currentStockingRequest.id,
           runId: run.id,
           plannedQty,
           predictedStartDate: now,
@@ -121,16 +202,6 @@ export class RecalculationService {
         );
         const hasSharedMaterialBlock = Boolean(batchWithSharedReason.blockingReason);
 
-        const launchableQtyNow = await this.prisma.productionBatch.aggregate({
-          where: {
-            productId: product.id,
-            batchStatus: ProductionBatchStatus.COMPLETED,
-          },
-          _sum: {
-            plannedQty: true,
-          },
-        });
-
         const shortTermWindowDays = Number(
           process.env.SHORT_TERM_WINDOW_DAYS ?? product.shortWindowDays ?? 7,
         );
@@ -138,6 +209,7 @@ export class RecalculationService {
         const shortTermIncrement = await this.prisma.productionBatch.aggregate({
           where: {
             productId: product.id,
+            stockingRequestId: currentStockingRequest.id,
             batchStatus: {
               in: [ProductionBatchStatus.PENDING, ProductionBatchStatus.COMPLETED],
             },
@@ -151,13 +223,16 @@ export class RecalculationService {
             plannedQty: true,
           },
         });
-        const currentLaunchableQty = launchableQtyNow._sum.plannedQty ?? 0;
 
         await this.writeSnapshot(run.id, product.id, {
-          launchableQtyNow: currentLaunchableQty,
+          stockingRequestId: currentStockingRequest.id,
+          launchableQtyNow: remainingAllocatableQty,
           launchableQtyShortTerm: shortTermIncrement._sum.plannedQty ?? 0,
+          roundLaunchQty,
+          allocatedLaunchQty,
+          remainingAllocatableQty,
           productState:
-            currentLaunchableQty > 0
+            remainingAllocatableQty > 0
               ? ProductState.LAUNCHABLE
               : hasSharedMaterialBlock
                 ? ProductState.BLOCKED
@@ -196,6 +271,7 @@ export class RecalculationService {
 
   private async calculateCandidateBatchPlan(
     productId: string,
+    stockingRequestId: string,
     minimumCandidateQty: number,
     bomItems: Array<{
       materialId: string;
@@ -221,6 +297,9 @@ export class RecalculationService {
           productId,
           receiptBatch: {
             materialId: item.materialId,
+            materialFollowUp: {
+              stockingRequestId,
+            },
           },
         },
         _sum: {
@@ -309,6 +388,7 @@ export class RecalculationService {
   private async ensurePredictedBatch(input: {
     productId: string;
     bomVersionId: string;
+    stockingRequestId: string;
     runId: string;
     plannedQty: number;
     predictedStartDate: Date;
@@ -319,6 +399,7 @@ export class RecalculationService {
     const existingPending = await this.prisma.productionBatch.findFirst({
       where: {
         productId: input.productId,
+        stockingRequestId: input.stockingRequestId,
         batchStatus: ProductionBatchStatus.PENDING,
       },
       orderBy: {
@@ -331,6 +412,7 @@ export class RecalculationService {
         where: { id: existingPending.id },
         data: {
           bomVersionId: input.bomVersionId,
+          stockingRequestId: input.stockingRequestId,
           plannedQty: input.plannedQty,
           predictedStartDate: input.predictedStartDate,
           predictedFinishDate: input.predictedFinishDate,
@@ -351,6 +433,7 @@ export class RecalculationService {
       data: {
         productId: input.productId,
         bomVersionId: input.bomVersionId,
+        stockingRequestId: input.stockingRequestId,
         batchNo: `PB-${String(sequence + 1).padStart(4, '0')}`,
         plannedQty: input.plannedQty,
         batchStatus: ProductionBatchStatus.PENDING,
@@ -369,6 +452,10 @@ export class RecalculationService {
     data: {
       launchableQtyNow: number;
       launchableQtyShortTerm: number;
+      stockingRequestId: string | null;
+      roundLaunchQty: number;
+      allocatedLaunchQty: number;
+      remainingAllocatableQty: number;
       productState: ProductState;
       nextLaunchDate: Date | null;
       reasonSummary: string;

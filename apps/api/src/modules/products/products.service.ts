@@ -75,6 +75,9 @@ export class ProductsService {
         status: snapshot?.productState ?? ProductState.BLOCKED,
         launchableQtyNow: snapshot?.launchableQtyNow ?? 0,
         shortTermIncrementQty: snapshot?.launchableQtyShortTerm ?? 0,
+        roundLaunchQty: snapshot?.roundLaunchQty ?? 0,
+        allocatedLaunchQty: snapshot?.allocatedLaunchQty ?? 0,
+        remainingAllocatableQty: snapshot?.remainingAllocatableQty ?? 0,
         nextLaunchDate: snapshot?.nextLaunchDate ?? null,
         reasonSummary: snapshot?.reasonSummary ?? '等待首轮重算结果',
       };
@@ -103,6 +106,9 @@ export class ProductsService {
       state: snapshot?.productState ?? ProductState.BLOCKED,
       launchableQtyNow: snapshot?.launchableQtyNow ?? 0,
       shortTermIncrementQty: snapshot?.launchableQtyShortTerm ?? 0,
+      roundLaunchQty: snapshot?.roundLaunchQty ?? 0,
+      allocatedLaunchQty: snapshot?.allocatedLaunchQty ?? 0,
+      remainingAllocatableQty: snapshot?.remainingAllocatableQty ?? 0,
       nextLaunchDate: snapshot?.nextLaunchDate ?? null,
       reasonSummary: snapshot?.reasonSummary ?? '等待首轮重算结果',
       bom: activeBom

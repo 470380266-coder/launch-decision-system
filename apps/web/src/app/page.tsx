@@ -16,7 +16,7 @@ function formatDate(input: string | null) {
 
 export default async function HomePage() {
   const products = await getProducts();
-  const launchableCount = products.filter((item) => item.status === 'LAUNCHABLE').length;
+  const launchableCount = products.filter((item) => item.remainingAllocatableQty > 0).length;
   const blockedCount = products.filter((item) => item.status === 'BLOCKED').length;
 
   return (
@@ -42,7 +42,7 @@ export default async function HomePage() {
             <div className="home-stat-value">{products.length}</div>
           </div>
           <div className="home-stat-card">
-            <div className="home-stat-label">当前可上架</div>
+            <div className="home-stat-label">本轮可分配</div>
             <div className="home-stat-value home-stat-value-blue">{launchableCount}</div>
           </div>
           <div className="home-stat-card">
@@ -62,8 +62,9 @@ export default async function HomePage() {
               <thead>
                 <tr>
                   <th>单品</th>
-                  <th>当前已可上架</th>
-                  <th>短期新增</th>
+                  <th>本轮可上架量</th>
+                  <th>已分配上架量</th>
+                  <th>剩余可分配上架量</th>
                   <th>下一批预计上架</th>
                   <th>状态</th>
                   <th>关键原因</th>
@@ -79,8 +80,9 @@ export default async function HomePage() {
                         <span>{product.code}</span>
                       </Link>
                     </td>
-                    <td>{product.launchableQtyNow}</td>
-                    <td>{product.shortTermIncrementQty}</td>
+                    <td>{product.roundLaunchQty}</td>
+                    <td>{product.allocatedLaunchQty}</td>
+                    <td>{product.remainingAllocatableQty}</td>
                     <td>{formatDate(product.nextLaunchDate)}</td>
                     <td>
                       <StatusChip state={product.status} variant="plain" />
@@ -109,12 +111,16 @@ export default async function HomePage() {
                 </div>
                 <div className="home-mobile-metrics">
                   <div>
-                    <span>已可上架</span>
-                    <strong>{product.launchableQtyNow}</strong>
+                    <span>本轮可上架</span>
+                    <strong>{product.roundLaunchQty}</strong>
                   </div>
                   <div>
-                    <span>短期新增</span>
-                    <strong>{product.shortTermIncrementQty}</strong>
+                    <span>已分配</span>
+                    <strong>{product.allocatedLaunchQty}</strong>
+                  </div>
+                  <div>
+                    <span>剩余可分配</span>
+                    <strong>{product.remainingAllocatableQty}</strong>
                   </div>
                   <div>
                     <span>下一批</span>
