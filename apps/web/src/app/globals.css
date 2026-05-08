@@ -3464,7 +3464,7 @@ textarea {
 .app-bom-editor-head,
 .app-bom-editor-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) 120px 140px 56px;
+  grid-template-columns: minmax(420px, 1fr) 104px 120px 40px;
   align-items: center;
   gap: 12px;
   padding: 0 12px;

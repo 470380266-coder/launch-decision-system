@@ -3683,7 +3683,7 @@ function AddBomModal({
       onClose={onClose}
       open={open}
       title="新增 BOM 版本"
-      width={720}
+      width={920}
     >
       <div className="app-modal-grid">
         <FormField label="BOM 版本号" required>
