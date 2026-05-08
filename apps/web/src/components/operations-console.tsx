@@ -2723,8 +2723,15 @@ function ProductWorkspace({
     onMessage(null);
     onError(null);
 
-    if (!selectedProductId || !bomForm.versionNo.trim()) {
+    const versionNo = bomForm.versionNo.trim();
+    if (!selectedProductId || !versionNo) {
       onError('请输入 BOM 版本号');
+      return;
+    }
+
+    const duplicateCheck = validateBomDraft(bomForm, data.materials);
+    if (duplicateCheck) {
+      onError(duplicateCheck);
       return;
     }
 
@@ -2750,8 +2757,8 @@ function ProductWorkspace({
 
             const material = await createMaterial(
               {
-                materialName: item.materialName,
-                materialCode: item.materialCode,
+                materialName: item.materialName.trim(),
+                materialCode: item.materialCode.trim(),
                 materialSpec: item.materialSpec || undefined,
                 unit: item.materialUnit || 'pcs',
               },
@@ -2770,6 +2777,7 @@ function ProductWorkspace({
           {
             ...bomForm,
             productId: selectedProductId,
+            versionNo,
             remark: bomForm.remark || undefined,
             items,
           },
@@ -3206,6 +3214,54 @@ function getReusableBomMaterials(
   });
 
   return materials.filter((material) => !dedicatedMaterialIds.has(material.id));
+}
+
+function validateBomDraft(
+  bomForm: BomFormDraft,
+  materials: OperationBootstrap['materials'],
+) {
+  const materialIds = new Set<string>();
+  const materialCodes = new Set<string>();
+  const existingMaterialCodes = new Set(materials.map((material) => material.code.trim()));
+
+  for (const item of bomForm.items) {
+    if (!Number.isFinite(Number(item.unitUsage)) || Number(item.unitUsage) <= 0) {
+      return 'BOM 单耗必须大于 0';
+    }
+
+    if ((item.materialMode ?? 'existing') !== 'new') {
+      if (!item.materialId) {
+        return '当前没有可复用的已有子料，请新增子料';
+      }
+
+      if (materialIds.has(item.materialId)) {
+        return 'BOM 不能包含重复子料';
+      }
+
+      materialIds.add(item.materialId);
+      continue;
+    }
+
+    const materialName = item.materialName?.trim() ?? '';
+    const materialCode = item.materialCode?.trim() ?? '';
+    const materialUnit = item.materialUnit?.trim() ?? '';
+
+    if (!materialName || !materialCode || !materialUnit) {
+      return '请输入新增子料的名称、编码和单位';
+    }
+
+    if (existingMaterialCodes.has(materialCode)) {
+      return '子料编码已存在，请改用已有子料或更换编码';
+    }
+
+    if (materialCodes.has(materialCode)) {
+      return '新增子料编码不能重复';
+    }
+
+    materialCodes.add(materialCode);
+  }
+
+  return null;
 }
 
 function AddProductModal({

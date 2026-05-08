@@ -1,12 +1,14 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import {
   ProcurementOrderStatus,
   ProcurementProductionStatus,
   ProductionBatchStatus,
+  Prisma,
   RunType,
   StockingRequestStatus,
   UserRole,
@@ -28,6 +30,8 @@ import { UpdateProcurementTrackDto } from './dto/update-procurement-track.dto';
 
 @Injectable()
 export class OperationsService {
+  private readonly logger = new Logger(OperationsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     private readonly recalculationService: RecalculationService,
@@ -1242,6 +1246,22 @@ export class OperationsService {
   }
 
   async createBomVersion(dto: CreateBomVersionDto) {
+    const versionNo = dto.versionNo.trim();
+    if (!versionNo) {
+      throw new BadRequestException('请输入 BOM 版本号');
+    }
+
+    if (Number.isNaN(new Date(dto.effectiveFrom).getTime())) {
+      throw new BadRequestException('请输入有效的 BOM 生效时间');
+    }
+
+    const invalidItem = dto.items.find(
+      (item) => !Number.isFinite(item.unitUsage) || item.unitUsage <= 0,
+    );
+    if (invalidItem) {
+      throw new BadRequestException('BOM 单耗必须大于 0');
+    }
+
     const product = await this.prisma.product.findUnique({
       where: { id: dto.productId },
     });
@@ -1303,47 +1323,49 @@ export class OperationsService {
     const activate = existingBomCount === 0 || dto.activate === true;
     const effectiveFrom = new Date(dto.effectiveFrom);
 
-    const bom = await this.prisma.$transaction(async (tx) => {
-      if (activate) {
-        await tx.bomVersion.updateMany({
-          where: {
-            productId: dto.productId,
-            isActive: true,
-          },
-          data: {
-            isActive: false,
-            effectiveTo: effectiveFrom,
-          },
-        });
-      }
+    const bom = await this.handlePrismaWrite(async () =>
+      this.prisma.$transaction(async (tx) => {
+        if (activate) {
+          await tx.bomVersion.updateMany({
+            where: {
+              productId: dto.productId,
+              isActive: true,
+            },
+            data: {
+              isActive: false,
+              effectiveTo: effectiveFrom,
+            },
+          });
+        }
 
-      return tx.bomVersion.create({
-        data: {
-          productId: dto.productId,
-          versionNo: dto.versionNo,
-          effectiveFrom,
-          isActive: activate,
-          remark: dto.remark,
-          items: {
-            create: dto.items.map((item) => ({
-              materialId: item.materialId,
-              unitUsage: item.unitUsage,
-              isSharedMaterial: item.isSharedMaterial,
-            })),
-          },
-        },
-        include: {
-          items: {
-            include: {
-              material: true,
+        return tx.bomVersion.create({
+          data: {
+            productId: dto.productId,
+            versionNo,
+            effectiveFrom,
+            isActive: activate,
+            remark: dto.remark?.trim() || undefined,
+            items: {
+              create: dto.items.map((item) => ({
+                materialId: item.materialId,
+                unitUsage: item.unitUsage,
+                isSharedMaterial: item.isSharedMaterial,
+              })),
             },
           },
-        },
-      });
-    });
+          include: {
+            items: {
+              include: {
+                material: true,
+              },
+            },
+          },
+        });
+      }),
+    );
 
     if (activate) {
-      await this.recalculateNow();
+      await this.recalculateNow({ failOpen: true });
     }
 
     return bom;
@@ -1381,20 +1403,30 @@ export class OperationsService {
       });
     });
 
-    await this.recalculateNow();
+    await this.recalculateNow({ failOpen: true });
 
     return activated;
   }
 
   async createMaterial(dto: CreateMaterialDto) {
-    const material = await this.prisma.material.create({
-      data: {
-        materialCode: dto.materialCode,
-        materialName: dto.materialName,
-        materialSpec: dto.materialSpec,
-        unit: dto.unit,
-      },
-    });
+    const materialCode = dto.materialCode.trim();
+    const materialName = dto.materialName.trim();
+    const unit = dto.unit.trim();
+
+    if (!materialCode || !materialName || !unit) {
+      throw new BadRequestException('请输入子料编码、名称和单位');
+    }
+
+    const material = await this.handlePrismaWrite(() =>
+      this.prisma.material.create({
+        data: {
+          materialCode,
+          materialName,
+          materialSpec: dto.materialSpec?.trim() || undefined,
+          unit,
+        },
+      }),
+    );
 
     return {
       id: material.id,
@@ -1403,6 +1435,32 @@ export class OperationsService {
       spec: material.materialSpec,
       unit: material.unit,
     };
+  }
+
+  private async handlePrismaWrite<T>(write: () => Promise<T>): Promise<T> {
+    try {
+      return await write();
+    } catch (error) {
+      if (error instanceof Prisma.PrismaClientKnownRequestError) {
+        if (error.code === 'P2002') {
+          const target = Array.isArray(error.meta?.target)
+            ? error.meta.target.join(', ')
+            : String(error.meta?.target ?? '');
+
+          if (target.includes('materialCode')) {
+            throw new BadRequestException('子料编码已存在，请改用已有子料或更换编码');
+          }
+
+          throw new BadRequestException('存在重复数据，请检查编码或版本号');
+        }
+
+        if (error.code === 'P2003') {
+          throw new BadRequestException('关联数据不存在或已被删除，请刷新后重试');
+        }
+      }
+
+      throw error;
+    }
   }
 
   async updateBatchStatus(id: string, dto: UpdateBatchStatusDto) {
@@ -1480,8 +1538,19 @@ export class OperationsService {
     return actual;
   }
 
-  private async recalculateNow() {
-    await this.recalculationService.run(RunType.MANUAL);
+  private async recalculateNow(options: { failOpen?: boolean } = {}) {
+    try {
+      await this.recalculationService.run(RunType.MANUAL);
+    } catch (error) {
+      if (!options.failOpen) {
+        throw error;
+      }
+
+      this.logger.error(
+        'Recalculation failed after BOM change; BOM write was kept.',
+        error instanceof Error ? error.stack : String(error),
+      );
+    }
   }
 }
 
