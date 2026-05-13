@@ -8,8 +8,37 @@ import {
   RunType,
   UserRole,
 } from '@prisma/client';
+import bcrypt from 'bcrypt';
 
 const prisma = new PrismaClient();
+const saltRounds = 12;
+
+const seedUsers = [
+  {
+    name: '系统管理员',
+    username: 'admin',
+    password: 'Admin@123456',
+    role: UserRole.ADMIN,
+  },
+  {
+    name: '采购A',
+    username: 'purchaser_a',
+    password: 'Purchaser@123456',
+    role: UserRole.PURCHASER,
+  },
+  {
+    name: '采购B',
+    username: 'purchaser_b',
+    password: 'PurchaserB@123456',
+    role: UserRole.PURCHASER,
+  },
+  {
+    name: '运营查看',
+    username: 'operator',
+    password: 'Viewer@123456',
+    role: UserRole.VIEWER,
+  },
+] as const;
 
 async function main() {
   await prisma.sharedMaterialAllocation.deleteMany();
@@ -27,30 +56,47 @@ async function main() {
   await prisma.calcRun.deleteMany();
   await prisma.user.deleteMany();
 
+  const [
+    adminPasswordHash,
+    purchaserPasswordHash,
+    purchaserBPasswordHash,
+    viewerPasswordHash,
+  ] =
+    await Promise.all(seedUsers.map((user) => bcrypt.hash(user.password, saltRounds)));
+
   const admin = await prisma.user.create({
     data: {
-      name: '系统管理员',
-      username: 'admin',
-      passwordHash: 'dev-only',
-      role: UserRole.ADMIN,
+      name: seedUsers[0].name,
+      username: seedUsers[0].username,
+      passwordHash: adminPasswordHash,
+      role: seedUsers[0].role,
     },
   });
 
   const purchaser = await prisma.user.create({
     data: {
-      name: '采购A',
-      username: 'purchaser_a',
-      passwordHash: 'dev-only',
-      role: UserRole.PURCHASER,
+      name: seedUsers[1].name,
+      username: seedUsers[1].username,
+      passwordHash: purchaserPasswordHash,
+      role: seedUsers[1].role,
     },
   });
 
   await prisma.user.create({
     data: {
-      name: '运营查看',
-      username: 'operator',
-      passwordHash: 'dev-only',
-      role: UserRole.VIEWER,
+      name: seedUsers[2].name,
+      username: seedUsers[2].username,
+      passwordHash: purchaserBPasswordHash,
+      role: seedUsers[2].role,
+    },
+  });
+
+  await prisma.user.create({
+    data: {
+      name: seedUsers[3].name,
+      username: seedUsers[3].username,
+      passwordHash: viewerPasswordHash,
+      role: seedUsers[3].role,
     },
   });
 

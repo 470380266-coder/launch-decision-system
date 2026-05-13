@@ -154,6 +154,12 @@ export class OperationsController {
     return this.operationsService.createMaterial(dto);
   }
 
+  @Patch('materials/:id')
+  @Roles(UserRole.ADMIN)
+  updateMaterial(@Param('id') id: string, @Body() dto: CreateMaterialDto) {
+    return this.operationsService.updateMaterial(id, dto);
+  }
+
   @Patch('production-batches/:id/status')
   @Roles(UserRole.ADMIN)
   updateBatchStatus(

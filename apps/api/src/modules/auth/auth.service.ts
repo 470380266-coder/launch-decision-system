@@ -1,6 +1,7 @@
 import { Injectable, UnauthorizedException } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { UserRole } from '@prisma/client';
+import bcrypt from 'bcrypt';
 import { PrismaService } from '../shared/prisma.service';
 
 @Injectable()
@@ -15,7 +16,13 @@ export class AuthService {
       where: { username },
     });
 
-    if (!user || user.passwordHash !== password || user.status !== 'ACTIVE') {
+    if (!user || user.status !== 'ACTIVE') {
+      throw new UnauthorizedException('Invalid credentials');
+    }
+
+    const isPasswordValid = await bcrypt.compare(password, user.passwordHash);
+
+    if (!isPasswordValid) {
       throw new UnauthorizedException('Invalid credentials');
     }
 
@@ -57,4 +64,3 @@ export class AuthService {
     }
   }
 }
-

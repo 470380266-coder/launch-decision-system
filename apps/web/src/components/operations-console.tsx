@@ -1,6 +1,7 @@
 'use client';
 
 import Link from 'next/link';
+import { useRouter } from 'next/navigation';
 import { useEffect, useMemo, useState, useTransition } from 'react';
 import {
   activateBomVersion,
@@ -16,6 +17,7 @@ import {
   terminateStockingRequest,
   updateBatchActual,
   updateBatchStatus,
+  updateMaterial,
   updateProcurementTrack,
 } from '@/lib/api';
 import { rolePageTitle, roleTitleLabel } from '@/lib/role-display';
@@ -205,6 +207,7 @@ export function OperationsConsole({
 }: {
   initialData: OperationBootstrap | null;
 }) {
+  const router = useRouter();
   const [data, setData] = useState<OperationBootstrap | null>(initialData);
   const [user, setUser] = useState<AuthUser | null>(null);
   const [token, setToken] = useState<string | null>(null);
@@ -218,6 +221,7 @@ export function OperationsConsole({
 
     if (!storedToken) {
       setAuthLoading(false);
+      router.replace('/login');
       return;
     }
 
@@ -232,17 +236,21 @@ export function OperationsConsole({
       } catch {
         window.localStorage.removeItem(TOKEN_KEY);
         setError('登录已失效，请重新登录');
+        router.replace('/login');
       } finally {
         setAuthLoading(false);
       }
     })();
-  }, []);
+  }, [router]);
 
   useEffect(() => {
     if (user) {
       document.title = rolePageTitle(user.role);
+      if (user.role === 'VIEWER') {
+        router.replace('/');
+      }
     }
-  }, [user]);
+  }, [router, user]);
 
   async function refreshData() {
     if (!token) {
@@ -2649,6 +2657,8 @@ function ProductWorkspace({
   const [previewBomVersionId, setPreviewBomVersionId] = useState<string | null>(null);
   const [showProductModal, setShowProductModal] = useState(false);
   const [showSubMaterialModal, setShowSubMaterialModal] = useState(false);
+  const [materialModalMode, setMaterialModalMode] = useState<'create' | 'edit'>('create');
+  const [editingMaterialId, setEditingMaterialId] = useState<string | null>(null);
   const [showBomModal, setShowBomModal] = useState(false);
   const [showStockingModal, setShowStockingModal] = useState(false);
   const [stockingForm, setStockingForm] = useState<StockingRequestDraft>({
@@ -2673,6 +2683,7 @@ function ProductWorkspace({
   });
   const selectedBom = data.activeBoms.find((bom) => bom.productId === selectedProductId);
   const selectedProduct = data.products.find((product) => product.id === selectedProductId);
+  const editingMaterial = data.materials.find((material) => material.id === editingMaterialId);
   const selectedBomVersions = data.bomVersions.filter(
     (bom) => bom.productId === selectedProductId,
   );
@@ -2717,6 +2728,19 @@ function ProductWorkspace({
       selectedBomItemIds: selectedBom.items.map((item) => item.id),
     });
     setShowStockingModal(true);
+  }
+
+  function openCreateMaterialModal() {
+    setMaterialModalMode('create');
+    setEditingMaterialId(null);
+    setShowSubMaterialModal(true);
+  }
+
+  function openEditMaterialModal() {
+    const firstMaterialId = data.materials[0]?.id ?? null;
+    setMaterialModalMode('edit');
+    setEditingMaterialId((current) => current ?? firstMaterialId);
+    setShowSubMaterialModal(true);
   }
 
   function saveBomVersion() {
@@ -2862,6 +2886,27 @@ function ProductWorkspace({
 
     startTransition(async () => {
       try {
+        if (materialModalMode === 'edit') {
+          if (!editingMaterialId) {
+            throw new Error('请选择要编辑的子料件');
+          }
+
+          await updateMaterial(
+            editingMaterialId,
+            {
+              materialCode: draft.code,
+              materialName: draft.name,
+              materialSpec: draft.spec || undefined,
+              unit: draft.unit,
+            },
+            token,
+          );
+          await onRefresh();
+          setShowSubMaterialModal(false);
+          onMessage('子料件资料已更新');
+          return;
+        }
+
         await createMaterial(
           {
             materialCode: draft.code,
@@ -2875,7 +2920,7 @@ function ProductWorkspace({
         setShowSubMaterialModal(false);
         onMessage('子料件已新增');
       } catch (submissionError) {
-        onError(submissionError instanceof Error ? submissionError.message : '新增子料件失败');
+        onError(submissionError instanceof Error ? submissionError.message : '保存子料件失败');
       }
     });
   }
@@ -2931,7 +2976,7 @@ function ProductWorkspace({
         <div className="admin-product-actions">
           <button
             className="ops-secondary-button"
-            onClick={() => setShowSubMaterialModal(true)}
+            onClick={openCreateMaterialModal}
             type="button"
           >
             新增子料件
@@ -2973,6 +3018,14 @@ function ProductWorkspace({
           <div className="admin-material-summary">
             <span>子料件</span>
             <strong>已维护 {data.materials.length} 个子料件</strong>
+            <button
+              className="ops-secondary-button admin-material-edit-button"
+              disabled={data.materials.length === 0}
+              onClick={openEditMaterialModal}
+              type="button"
+            >
+              编辑子料件资料
+            </button>
           </div>
         </section>
 
@@ -3125,9 +3178,14 @@ function ProductWorkspace({
         onSubmit={saveProduct}
       />
       <AddSubMaterialModal
+        material={editingMaterial}
+        materials={data.materials}
+        mode={materialModalMode}
         open={showSubMaterialModal}
         onClose={() => setShowSubMaterialModal(false)}
         onSubmit={saveMaterial}
+        selectedMaterialId={editingMaterialId}
+        setSelectedMaterialId={setEditingMaterialId}
       />
       <AddBomModal
         bomForm={bomForm}
@@ -3251,7 +3309,7 @@ function validateBomDraft(
     }
 
     if (existingMaterialCodes.has(materialCode)) {
-      return '子料编码已存在，请改用已有子料或更换编码';
+      return '子料编码已存在，请选择已有子料，或在子料件资料中编辑';
     }
 
     if (materialCodes.has(materialCode)) {
@@ -3387,13 +3445,23 @@ function AddProductModal({
 }
 
 function AddSubMaterialModal({
+  material,
+  materials,
+  mode,
   onClose,
   onSubmit,
   open,
+  selectedMaterialId,
+  setSelectedMaterialId,
 }: {
+  material: OperationBootstrap['materials'][number] | undefined;
+  materials: OperationBootstrap['materials'];
+  mode: 'create' | 'edit';
   open: boolean;
   onClose: () => void;
   onSubmit: (draft: MaterialDraft) => void;
+  selectedMaterialId: string | null;
+  setSelectedMaterialId: React.Dispatch<React.SetStateAction<string | null>>;
 }) {
   const [draft, setDraft] = useState<MaterialDraft>({
     code: '',
@@ -3402,12 +3470,34 @@ function AddSubMaterialModal({
     unit: 'pcs',
   });
 
+  useEffect(() => {
+    if (!open) {
+      return;
+    }
+
+    if (mode === 'edit' && material) {
+      setDraft({
+        code: material.code,
+        name: material.name,
+        spec: material.spec ?? '',
+        unit: material.unit,
+      });
+      return;
+    }
+
+    if (mode === 'create') {
+      setDraft({ code: '', name: '', spec: '', unit: 'pcs' });
+    }
+  }, [material, mode, open]);
+
   function submit() {
     if (!draft.code || !draft.name) {
       return;
     }
     onSubmit(draft);
-    setDraft({ code: '', name: '', spec: '', unit: 'pcs' });
+    if (mode === 'create') {
+      setDraft({ code: '', name: '', spec: '', unit: 'pcs' });
+    }
   }
 
   return (
@@ -3418,16 +3508,31 @@ function AddSubMaterialModal({
             取消
           </AppButton>
           <AppButton onClick={submit} type="button">
-            保存子件
+            {mode === 'edit' ? '保存修改' : '保存子件'}
           </AppButton>
         </>
       }
       onClose={onClose}
       open={open}
-      title="新增子件"
+      title={mode === 'edit' ? '编辑子料件资料' : '新增子件'}
       width={600}
     >
       <div className="app-modal-grid">
+        {mode === 'edit' ? (
+          <FormField label="选择子料件" required>
+            <select
+              className={selectCls}
+              value={selectedMaterialId ?? ''}
+              onChange={(event) => setSelectedMaterialId(event.target.value)}
+            >
+              {materials.map((item) => (
+                <option key={item.id} value={item.id}>
+                  {item.code}・{item.name}・{item.unit}
+                </option>
+              ))}
+            </select>
+          </FormField>
+        ) : null}
         <FormField label="子料名称" required>
           <input
             className={inputCls}

@@ -74,10 +74,10 @@ export const mockProductDetail: ProductDetail = {
 
 export const mockOperations: OperationBootstrap = {
   materials: [
-    { id: 'mat-1', code: 'MAT-BOTTLE', name: '瓶身', unit: 'pcs' },
-    { id: 'mat-2', code: 'MAT-CAP', name: '瓶盖', unit: 'pcs' },
-    { id: 'mat-3', code: 'MAT-BOX', name: '彩盒', unit: 'pcs' },
-    { id: 'mat-4', code: 'MAT-STICKER', name: '通用贴纸', unit: 'pcs' },
+    { id: 'mat-1', code: 'MAT-BOTTLE', name: '瓶身', spec: null, unit: 'pcs' },
+    { id: 'mat-2', code: 'MAT-CAP', name: '瓶盖', spec: null, unit: 'pcs' },
+    { id: 'mat-3', code: 'MAT-BOX', name: '彩盒', spec: null, unit: 'pcs' },
+    { id: 'mat-4', code: 'MAT-STICKER', name: '通用贴纸', spec: null, unit: 'pcs' },
   ],
   products: [{ id: 'demo-product-1', code: 'SKU-LIVE-001', name: '直播爆品精华水' }],
   purchasers: [{ id: 'user-p1', name: '采购A', username: 'purchaser_a' }],

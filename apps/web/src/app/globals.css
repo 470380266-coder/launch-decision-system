@@ -2991,6 +2991,10 @@ textarea {
   font-weight: 400;
 }
 
+.admin-material-edit-button {
+  width: fit-content;
+}
+
 .admin-bom-card {
   overflow: hidden;
 }

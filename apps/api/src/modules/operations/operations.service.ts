@@ -1437,6 +1437,46 @@ export class OperationsService {
     };
   }
 
+  async updateMaterial(id: string, dto: CreateMaterialDto) {
+    const materialCode = dto.materialCode.trim();
+    const materialName = dto.materialName.trim();
+    const unit = dto.unit.trim();
+
+    if (!materialCode || !materialName || !unit) {
+      throw new BadRequestException('请输入子料编码、名称和单位');
+    }
+
+    const existing = await this.prisma.material.findUnique({
+      where: { id },
+    });
+
+    if (!existing) {
+      throw new NotFoundException('Material not found');
+    }
+
+    const material = await this.handlePrismaWrite(() =>
+      this.prisma.material.update({
+        where: { id },
+        data: {
+          materialCode,
+          materialName,
+          materialSpec: dto.materialSpec?.trim() || null,
+          unit,
+        },
+      }),
+    );
+
+    await this.recalculateNow({ failOpen: true });
+
+    return {
+      id: material.id,
+      code: material.materialCode,
+      name: material.materialName,
+      spec: material.materialSpec,
+      unit: material.unit,
+    };
+  }
+
   private async handlePrismaWrite<T>(write: () => Promise<T>): Promise<T> {
     try {
       return await write();
@@ -1448,7 +1488,7 @@ export class OperationsService {
             : String(error.meta?.target ?? '');
 
           if (target.includes('materialCode')) {
-            throw new BadRequestException('子料编码已存在，请改用已有子料或更换编码');
+            throw new BadRequestException('子料编码已存在，请选择已有子料，或在子料件资料中编辑');
           }
 
           throw new BadRequestException('存在重复数据，请检查编码或版本号');

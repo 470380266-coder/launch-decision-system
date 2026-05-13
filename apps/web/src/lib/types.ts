@@ -81,6 +81,7 @@ export type OperationBootstrap = {
     id: string;
     code: string;
     name: string;
+    spec: string | null;
     unit: string;
   }>;
   products: Array<{

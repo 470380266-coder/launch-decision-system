@@ -6,13 +6,12 @@ import { login } from '@/lib/api';
 const TOKEN_KEY = 'launch-decision-token';
 
 const roleOptions = [
-  { key: 'viewer', label: '运营', username: 'ops', loginUsername: 'operator' },
-  { key: 'admin', label: '管理员', username: 'admin', loginUsername: 'admin' },
+  { key: 'viewer', label: '运营', username: 'operator' },
+  { key: 'admin', label: '管理员', username: 'admin' },
   {
     key: 'purchaser',
     label: '采购员',
-    username: 'purchase_yi',
-    loginUsername: 'purchaser_a',
+    username: 'purchaser_a',
   },
 ] as const;
 
@@ -42,16 +41,7 @@ export function LoginForm() {
 
     startTransition(async () => {
       try {
-        const selectedRoleOption = roleOptions.find(
-          (option) => option.key === selectedRole,
-        );
-        const requestUsername =
-          selectedRoleOption?.username === username
-            ? selectedRoleOption.loginUsername
-            : username;
-        const requestPassword =
-          process.env.NODE_ENV === 'production' ? password : 'dev-only';
-        const result = await login(requestUsername, requestPassword);
+        const result = await login(username, password);
         window.localStorage.setItem(TOKEN_KEY, result.accessToken);
         window.location.href =
           result.user.role === 'ADMIN' || result.user.role === 'PURCHASER'
@@ -112,7 +102,7 @@ export function LoginForm() {
         {isPending ? '登录中...' : '登录'}
       </button>
       {error ? <div className="login-error">{error}</div> : null}
-      <p className="login-help">演示环境,任意密码即可登录。切换角色需退出后重新登录。</p>
+      <p className="login-help">请输入服务端已配置账号的密码。切换角色需退出后重新登录。</p>
     </form>
   );
 }

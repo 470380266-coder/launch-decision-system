@@ -18,10 +18,23 @@ import {
   StockingRequestPayload,
 } from './types';
 
-export const API_BASE =
-  process.env.NEXT_PUBLIC_API_BASE_URL ??
-  process.env.API_BASE_URL ??
-  'http://localhost:3001/api';
+function getApiBase() {
+  if (process.env.NEXT_PUBLIC_API_BASE_URL) {
+    return process.env.NEXT_PUBLIC_API_BASE_URL;
+  }
+
+  if (process.env.API_BASE_URL) {
+    return process.env.API_BASE_URL;
+  }
+
+  if (typeof window !== 'undefined') {
+    return '/api';
+  }
+
+  return 'http://localhost:3001/api';
+}
+
+export const API_BASE = getApiBase();
 
 async function safeFetch<T>(path: string): Promise<T> {
   const response = await fetch(`${API_BASE}${path}`, {
@@ -125,6 +138,13 @@ export function createMaterial(payload: MaterialPayload, token: string) {
     MaterialPayload,
     { id: string; code: string; name: string; spec: string | null; unit: string }
   >('/operations/materials', payload, token);
+}
+
+export function updateMaterial(materialId: string, payload: MaterialPayload, token: string) {
+  return patchJson<
+    MaterialPayload,
+    { id: string; code: string; name: string; spec: string | null; unit: string }
+  >(`/operations/materials/${materialId}`, payload, token);
 }
 
 export function createProcurementTrack(
